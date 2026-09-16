@@ -5,11 +5,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from ha_client import HomeAssistantClient, HomeAssistantError
 
-mcp = FastMCP(
-    "home-assistant-chatgpt-connector",
-    host="0.0.0.0",
-    port=8000,
-)
+mcp = FastMCP("home-assistant-chatgpt-connector", host="0.0.0.0", port=8000)
 
 def client() -> HomeAssistantClient:
     return HomeAssistantClient()
@@ -29,29 +25,19 @@ async def list_entities(domain: str | None = None) -> list[dict[str, Any]]:
     if domain:
         prefix = f"{domain.strip().lower()}."
         states = [s for s in states if s.get("entity_id", "").startswith(prefix)]
-    return [
-        {
-            "entity_id": s.get("entity_id"),
-            "state": s.get("state"),
-            "friendly_name": s.get("attributes", {}).get("friendly_name"),
-        }
-        for s in states
-    ]
+    return [{"entity_id": s.get("entity_id"), "state": s.get("state"),
+             "friendly_name": s.get("attributes", {}).get("friendly_name")} for s in states]
 
 @mcp.tool()
 async def get_entity_state(entity_id: str) -> dict[str, Any]:
     """Read state and attributes of one Home Assistant entity."""
     item = await client().get_state(entity_id.strip())
-    return {
-        "entity_id": item.get("entity_id"),
-        "state": item.get("state"),
-        "attributes": item.get("attributes", {}),
-        "last_changed": item.get("last_changed"),
-        "last_updated": item.get("last_updated"),
-    }
+    return {"entity_id": item.get("entity_id"), "state": item.get("state"),
+            "attributes": item.get("attributes", {}), "last_changed": item.get("last_changed"),
+            "last_updated": item.get("last_updated")}
 
 async def startup_check() -> bool:
-    print("ChatGPT Connector 0.1.3 starting...", flush=True)
+    print("ChatGPT Connector 0.1.4 starting...", flush=True)
     try:
         ha = client()
         info = await ha.check_api()
@@ -66,6 +52,6 @@ async def startup_check() -> bool:
 if __name__ == "__main__":
     if not asyncio.run(startup_check()):
         raise SystemExit(1)
-    print("MCP server: listening on 0.0.0.0:8000 (SSE transport)", flush=True)
-    print("MCP endpoint: /sse", flush=True)
-    mcp.run(transport="sse")
+    print("MCP server: listening on 0.0.0.0:8000 (Streamable HTTP)", flush=True)
+    print("MCP endpoint: /mcp", flush=True)
+    mcp.run(transport="streamable-http")
