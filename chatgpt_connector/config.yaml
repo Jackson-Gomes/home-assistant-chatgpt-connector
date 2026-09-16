@@ -1,7 +1,7 @@
 name: ChatGPT Connector
-version: "0.1.3"
+version: "0.1.4"
 slug: chatgpt_connector
-description: Read-only MCP connector between ChatGPT and Home Assistant
+description: MCP connector between ChatGPT and Home Assistant using OpenAI Secure MCP Tunnel
 url: https://github.com/Jackson-Gomes/home-assistant-chatgpt-connector
 startup: application
 boot: auto
@@ -10,10 +10,13 @@ homeassistant_api: true
 arch:
   - amd64
   - aarch64
-  - armv7
 ports:
   8000/tcp: 8000
 ports_description:
-  8000/tcp: MCP SSE endpoint
-options: {}
-schema: {}
+  8000/tcp: Local MCP Streamable HTTP endpoint
+options:
+  tunnel_id: ""
+  tunnel_api_key: ""
+schema:
+  tunnel_id: str
+  tunnel_api_key: password
