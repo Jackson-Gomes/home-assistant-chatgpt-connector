@@ -29,22 +29,32 @@ class HomeAssistantClient:
             "Content-Type": "application/json",
         }
 
-    async def _get(self, path: str) -> Any:
+    async def _request(self, method: str, path: str, *, json: dict[str, Any] | None = None) -> Any:
         try:
             async with httpx.AsyncClient(
                 base_url=self.base_url,
                 headers=self.headers,
                 timeout=10.0,
             ) as client:
-                response = await client.get(path)
+                response = await client.request(method, path, json=json)
                 response.raise_for_status()
+                if not response.content:
+                    return None
                 return response.json()
         except httpx.HTTPStatusError as exc:
+            detail = exc.response.text.strip()
+            suffix = f": {detail}" if detail else "."
             raise HomeAssistantError(
-                f"Home Assistant returned HTTP {exc.response.status_code}."
+                f"Home Assistant returned HTTP {exc.response.status_code}{suffix}"
             ) from exc
         except httpx.HTTPError as exc:
             raise HomeAssistantError(f"Could not reach Home Assistant: {exc}") from exc
+
+    async def _get(self, path: str) -> Any:
+        return await self._request("GET", path)
+
+    async def _post(self, path: str, payload: dict[str, Any]) -> Any:
+        return await self._request("POST", path, json=payload)
 
     async def check_api(self) -> dict[str, Any]:
         return await self._get("/api/")
@@ -60,3 +70,16 @@ class HomeAssistantClient:
         if not isinstance(data, dict):
             raise HomeAssistantError("Unexpected entity response.")
         return data
+
+    async def call_service(
+        self,
+        domain: str,
+        service: str,
+        *,
+        entity_id: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> Any:
+        payload = dict(data or {})
+        if entity_id:
+            payload["entity_id"] = entity_id
+        return await self._post(f"/api/services/{domain}/{service}", payload)
