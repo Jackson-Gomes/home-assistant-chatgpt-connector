@@ -104,7 +104,7 @@ async def call_service(
 
 
 async def startup_check() -> bool:
-    print("ChatGPT Connector 0.1.6 starting...", flush=True)
+    print("ChatGPT Connector 0.1.7 starting...", flush=True)
     try:
         ha = client()
         info = await ha.check_api()
