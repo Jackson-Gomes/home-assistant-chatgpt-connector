@@ -1,4 +1,6 @@
 from __future__ import annotations
+import asyncio
+import sys
 from typing import Any
 from mcp.server.fastmcp import FastMCP
 from ha_client import HomeAssistantClient, HomeAssistantError
@@ -31,5 +33,21 @@ async def get_entity_state(entity_id: str) -> dict[str, Any]:
     item = await client().get_state(entity_id.strip())
     return {"entity_id": item.get("entity_id"), "state": item.get("state"), "attributes": item.get("attributes", {}), "last_changed": item.get("last_changed"), "last_updated": item.get("last_updated")}
 
+async def startup_check() -> bool:
+    print("ChatGPT Connector 0.1.2 starting...", flush=True)
+    try:
+        ha = client()
+        info = await ha.check_api()
+        states = await ha.list_states()
+        print(f"Home Assistant API: OK ({info.get('message', 'authenticated')})", flush=True)
+        print(f"Entities accessible: {len(states)}", flush=True)
+        return True
+    except Exception as exc:
+        print(f"Home Assistant API: ERROR - {exc}", file=sys.stderr, flush=True)
+        return False
+
 if __name__ == "__main__":
-    mcp.run()
+    if not asyncio.run(startup_check()):
+        raise SystemExit(1)
+    print("MCP server: starting (stdio transport)", flush=True)
+    mcp.run(transport="stdio")
