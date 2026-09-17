@@ -1,5 +1,5 @@
 name: ChatGPT Connector
-version: "0.2.0"
+version: "0.3.0"
 slug: chatgpt_connector
 description: MCP connector between ChatGPT and Home Assistant using OpenAI Secure MCP Tunnel
 url: https://github.com/Jackson-Gomes/home-assistant-chatgpt-connector
@@ -7,6 +7,8 @@ startup: application
 boot: auto
 init: false
 homeassistant_api: true
+hassio_api: true
+hassio_role: manager
 arch:
   - amd64
   - aarch64
