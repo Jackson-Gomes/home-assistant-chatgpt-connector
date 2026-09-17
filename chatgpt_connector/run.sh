@@ -2,6 +2,7 @@
 set -e
 export HA_URL="http://supervisor/core"
 export HA_TOKEN="$SUPERVISOR_TOKEN"
+export SUPERVISOR_URL="http://supervisor"
 TUNNEL_ID="$(bashio::config 'tunnel_id')"
 TUNNEL_API_KEY="$(bashio::config 'tunnel_api_key')"
 if [ -z "$TUNNEL_ID" ] || [ -z "$TUNNEL_API_KEY" ]; then
@@ -11,7 +12,7 @@ fi
 export CONTROL_PLANE_TUNNEL_ID="$TUNNEL_ID"
 export CONTROL_PLANE_API_KEY="$TUNNEL_API_KEY"
 export MCP_SERVER_URL="http://127.0.0.1:8000/mcp"
-python3 /app/server.py &
+python3 /app/admin_server.py &
 MCP_PID=$!
 cleanup() { kill "$MCP_PID" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
