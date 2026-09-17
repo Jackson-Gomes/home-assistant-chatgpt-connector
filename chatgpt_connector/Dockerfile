@@ -19,7 +19,7 @@ RUN arch="$(uname -m)" && \
     test -n "$bin" && install -m 0755 "$bin" /usr/local/bin/tunnel-client && \
     rm -rf /tmp/tunnel-client /tmp/tunnel-client.zip
 
-COPY ha_client.py server.py /app/
+COPY ha_client.py server.py admin_server.py /app/
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 CMD ["/run.sh"]
