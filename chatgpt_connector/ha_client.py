@@ -16,7 +16,8 @@ class HomeAssistantError(RuntimeError):
 class HomeAssistantClient:
     def __init__(self) -> None:
         self.base_url = os.environ.get("HA_URL", "http://supervisor/core").rstrip("/")
-        self.token = os.environ.get("HA_TOKEN", "")
+        self.supervisor_url = os.environ.get("SUPERVISOR_URL", "http://supervisor").rstrip("/")
+        self.token = os.environ.get("HA_TOKEN") or os.environ.get("SUPERVISOR_TOKEN", "")
         if not self.token:
             raise HomeAssistantError("Home Assistant Supervisor token is unavailable.")
 
@@ -49,11 +50,31 @@ class HomeAssistantClient:
         params: dict[str, Any] | None = None,
         expect_json: bool = True,
     ) -> Any:
+        return await self._request_base(
+            self.base_url,
+            method,
+            path,
+            json_data=json_data,
+            params=params,
+            expect_json=expect_json,
+        )
+
+    async def _request_base(
+        self,
+        base_url: str,
+        method: str,
+        path: str,
+        *,
+        json_data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        expect_json: bool = True,
+        timeout: float = 30.0,
+    ) -> Any:
         try:
             async with httpx.AsyncClient(
-                base_url=self.base_url,
+                base_url=base_url,
                 headers=self.headers,
-                timeout=20.0,
+                timeout=timeout,
             ) as client:
                 response = await client.request(
                     method,
@@ -76,6 +97,35 @@ class HomeAssistantClient:
         except httpx.HTTPError as exc:
             raise HomeAssistantError(f"Could not reach Home Assistant: {exc}") from exc
 
+    async def _supervisor_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        expect_json: bool = True,
+        timeout: float = 60.0,
+    ) -> Any:
+        data = await self._request_base(
+            self.supervisor_url,
+            method,
+            path,
+            json_data=json_data,
+            params=params,
+            expect_json=expect_json,
+            timeout=timeout,
+        )
+        if not expect_json:
+            return data
+        if isinstance(data, dict) and "result" in data:
+            if data.get("result") != "ok":
+                raise HomeAssistantError(
+                    f"Supervisor API error: {data.get('message', 'unknown error')}"
+                )
+            return data.get("data")
+        return data
+
     async def _get(
         self,
         path: str,
@@ -90,6 +140,10 @@ class HomeAssistantClient:
 
     async def check_api(self) -> dict[str, Any]:
         return await self._get("/api/")
+
+    async def supervisor_info(self) -> dict[str, Any]:
+        data = await self._supervisor_request("GET", "/info")
+        return data if isinstance(data, dict) else {"data": data}
 
     async def list_states(self) -> list[dict[str, Any]]:
         data = await self._get("/api/states")
@@ -206,7 +260,7 @@ class HomeAssistantClient:
                 self.websocket_url,
                 open_timeout=10,
                 close_timeout=5,
-                max_size=8 * 1024 * 1024,
+                max_size=16 * 1024 * 1024,
             ) as ws:
                 hello = json.loads(await ws.recv())
                 if hello.get("type") != "auth_required":
@@ -245,6 +299,12 @@ class HomeAssistantClient:
                 f"Home Assistant WebSocket request failed: {exc}"
             ) from exc
 
+    async def list_devices(self) -> Any:
+        return await self.websocket_command("config/device_registry/list")
+
+    async def list_integrations(self) -> Any:
+        return await self.websocket_command("config_entries/get")
+
     async def update_entity_registry(
         self,
         entity_id: str,
@@ -279,3 +339,99 @@ class HomeAssistantClient:
         if url_path is not None:
             data["url_path"] = url_path
         return await self.websocket_command("lovelace/config/save", data)
+
+    async def list_addons(self) -> list[dict[str, Any]]:
+        data = await self._supervisor_request("GET", "/addons")
+        if isinstance(data, dict):
+            addons = data.get("addons", [])
+        else:
+            addons = data or []
+        if not isinstance(addons, list):
+            raise HomeAssistantError("Unexpected Supervisor /addons response.")
+        return addons
+
+    async def get_addon_info(self, addon_slug: str) -> dict[str, Any]:
+        data = await self._supervisor_request(
+            "GET", f"/addons/{quote(addon_slug, safe='-_')}/info"
+        )
+        if not isinstance(data, dict):
+            raise HomeAssistantError("Unexpected add-on info response.")
+        return data
+
+    async def get_hardware_info(self) -> dict[str, Any]:
+        data = await self._supervisor_request("GET", "/hardware/info")
+        if not isinstance(data, dict):
+            raise HomeAssistantError("Unexpected hardware info response.")
+        return data
+
+    async def get_host_info(self) -> dict[str, Any]:
+        data = await self._supervisor_request("GET", "/host/info")
+        if not isinstance(data, dict):
+            raise HomeAssistantError("Unexpected host info response.")
+        return data
+
+    async def list_backups(self) -> list[dict[str, Any]]:
+        data = await self._supervisor_request("GET", "/backups")
+        if isinstance(data, dict):
+            backups = data.get("backups", [])
+        else:
+            backups = data or []
+        if not isinstance(backups, list):
+            raise HomeAssistantError("Unexpected backups response.")
+        return backups
+
+    async def create_full_backup(
+        self,
+        *,
+        name: str | None = None,
+        compressed: bool = True,
+        exclude_database: bool = False,
+    ) -> Any:
+        payload: dict[str, Any] = {
+            "compressed": compressed,
+            "homeassistant_exclude_database": exclude_database,
+            "background": True,
+        }
+        if name:
+            payload["name"] = name
+        return await self._supervisor_request(
+            "POST",
+            "/backups/new/full",
+            json_data=payload,
+            timeout=120.0,
+        )
+
+    async def get_job(self, job_id: str) -> Any:
+        return await self._supervisor_request(
+            "GET", f"/jobs/{quote(job_id, safe='-_')}"
+        )
+
+    async def get_admin_logs(
+        self,
+        source: str,
+        *,
+        addon_slug: str | None = None,
+        max_lines: int = 200,
+    ) -> str:
+        if source == "core":
+            path = "/core/logs/latest"
+        elif source == "supervisor":
+            path = "/supervisor/logs/latest"
+        elif source == "host":
+            path = "/host/logs"
+        elif source == "addon":
+            if not addon_slug:
+                raise HomeAssistantError("addon_slug is required for add-on logs.")
+            path = f"/addons/{quote(addon_slug, safe='-_')}/logs/latest"
+        else:
+            raise HomeAssistantError(
+                "source must be one of: core, supervisor, host, addon."
+            )
+
+        text = await self._supervisor_request(
+            "GET",
+            path,
+            params={"lines": max_lines},
+            expect_json=False,
+        )
+        return str(text or "")
