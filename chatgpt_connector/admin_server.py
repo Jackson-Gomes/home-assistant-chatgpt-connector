@@ -172,7 +172,7 @@ async def get_admin_logs(
 
 
 async def startup_check() -> bool:
-    print("ChatGPT Connector 0.3.0 (Admin API v2) starting...", flush=True)
+    print("ChatGPT Connector 0.4.0 (Admin API v2) starting...", flush=True)
     try:
         ha = client()
         core = await ha.check_api()
