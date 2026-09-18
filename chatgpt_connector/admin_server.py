@@ -4,8 +4,11 @@ import asyncio
 import sys
 from typing import Any
 
+from assist_admin import register_assist_tools
 from ha_client import HomeAssistantError
 from server import _clean_identifier, client, mcp
+
+register_assist_tools(mcp, client)
 
 
 @mcp.tool()
@@ -172,7 +175,7 @@ async def get_admin_logs(
 
 
 async def startup_check() -> bool:
-    print("ChatGPT Connector 0.4.0 (Admin API v2) starting...", flush=True)
+    print("ChatGPT Connector 0.5.0 (Admin API v2 + Assist Admin) starting...", flush=True)
     try:
         ha = client()
         core = await ha.check_api()
@@ -190,7 +193,10 @@ async def startup_check() -> bool:
         print(
             "Admin v2 tools enabled: admin_health, list_devices, list_integrations, "
             "list_addons, get_addon_info, get_hardware_info, get_host_info, "
-            "list_backups, create_full_backup, get_admin_job, get_admin_logs",
+            "list_backups, create_full_backup, get_admin_job, get_admin_logs; "
+            "Assist tools: list_assist_pipelines, update_assist_pipeline, "
+            "list_assist_exposed_entities, set_assist_entity_exposure, "
+            "set_assist_exposed_entities",
             flush=True,
         )
         return True

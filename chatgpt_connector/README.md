@@ -46,11 +46,26 @@ Operations that can change the installation should be exposed as explicit MCP to
 
 Admin API v2 currently focuses on inspection, diagnostics and backup creation. App installation/update/removal and broader system-changing operations are intentionally not exposed yet.
 
+## Assist administration (0.5.0)
+
+Version 0.5.0 adds a restricted MCP surface for Home Assistant Assist using the official Home Assistant WebSocket commands. It does not edit `.storage` files directly.
+
+- `list_assist_pipelines()` — lists Assist pipelines and the preferred pipeline
+- `update_assist_pipeline(pipeline_id, changes)` — updates only allowlisted official pipeline fields, including `conversation_engine`
+- `list_assist_exposed_entities()` — lists entities exposed to the `conversation` assistant
+- `set_assist_entity_exposure(entity_id, exposed)` — exposes or unexposes one validated entity
+- `set_assist_exposed_entities(entity_ids)` — makes the supplied entities the exact Assist allowlist and disables automatic exposure of new entities
+
+Initial safe configuration after installing 0.5.0:
+
+1. Update the desired pipeline with `changes={"conversation_engine": "conversation.codex_assist"}`.
+2. Call `set_assist_exposed_entities(["light.luz_do_escritorio"])`.
+
+The Assist tools do not add generic `/config` writes and do not access the APT0307 directories.
 
 ## Restricted config file access
 
 Version 0.3.1 mounts the Home Assistant `config` directory read/write so the connector can maintain web assets. The MCP write surface remains intentionally restricted in code to `/config/www/`; paths resolving outside that directory are rejected. This allows updates such as `/config/www/apto3d/index.html` without exposing a generic filesystem writer.
-
 
 ## APTO3D custom component access
 
