@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -35,6 +37,61 @@ def _clean_entity_id(value: str) -> str:
     _clean_identifier(domain, "entity domain")
     _clean_identifier(object_id, "entity object_id")
     return cleaned
+
+
+_CONFIG_ROOT = Path("/config").resolve()
+_WRITABLE_ROOT = (_CONFIG_ROOT / "www").resolve()
+
+
+def _resolve_config_path(path: str, *, write: bool = False) -> Path:
+    raw = path.strip()
+    if not raw:
+        raise ValueError("path is required.")
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = _CONFIG_ROOT / candidate
+    resolved = candidate.resolve(strict=False)
+    root = _WRITABLE_ROOT if write else _CONFIG_ROOT
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        scope = "/config/www/" if write else "/config/"
+        raise ValueError(f"path must stay inside {scope}") from exc
+    return resolved
+
+
+@mcp.tool()
+async def read_config_file(path: str, max_chars: int = 500000) -> dict[str, Any]:
+    """Read a UTF-8 text file under /config. Binary files are rejected."""
+    try:
+        target = _resolve_config_path(path)
+        max_chars = max(1, min(max_chars, 2_000_000))
+        if not target.is_file():
+            raise ValueError("file does not exist or is not a regular file.")
+        data = target.read_bytes()
+        if b"\\x00" in data:
+            raise ValueError("binary files are not supported.")
+        content = data.decode("utf-8")
+        return {"ok": True, "path": str(target), "truncated": len(content) > max_chars, "content": content[:max_chars]}
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+async def write_config_file(path: str, content: str) -> dict[str, Any]:
+    """Atomically write a UTF-8 text file under /config/www only.
+
+    Parent traversal and writes outside /config/www are rejected.
+    """
+    try:
+        target = _resolve_config_path(path, write=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp = target.with_name(target.name + ".chatgpt.tmp")
+        temp.write_text(content, encoding="utf-8")
+        os.replace(temp, target)
+        return {"ok": True, "path": str(target), "bytes": len(content.encode("utf-8"))}
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @mcp.tool()
@@ -315,7 +372,7 @@ async def save_dashboard(
 
 
 async def startup_check() -> bool:
-    print("ChatGPT Connector 0.2.0 starting...", flush=True)
+    print("ChatGPT Connector 0.3.1 starting...", flush=True)
     try:
         ha = client()
         info = await ha.check_api()
@@ -326,7 +383,7 @@ async def startup_check() -> bool:
         )
         print(f"Entities accessible: {len(states)}", flush=True)
         print(
-            "MCP tools: ha_health, list_entities, get_entity_state, list_services, "
+            "MCP tools: read_config_file, write_config_file, ha_health, list_entities, get_entity_state, list_services, "
             "get_history, get_logbook, get_error_log, call_service, "
             "get_automation_config, save_automation, get_script_config, save_script, "
             "update_entity, get_dashboard, save_dashboard",
