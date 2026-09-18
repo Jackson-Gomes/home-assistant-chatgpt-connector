@@ -6,7 +6,7 @@ Home Assistant OS add-on for the Home Assistant ChatGPT Connector.
 
 The add-on uses the Supervisor-provided `SUPERVISOR_TOKEN`; no long-lived Home Assistant token is stored in the repository or add-on configuration.
 
-Version 0.3.1 enables the Supervisor API with `hassio_role: manager`. This is intentionally narrower than the unrestricted `admin` role while still allowing the connector to inspect Home Assistant Core, apps/add-ons, backups, hardware, host information and logs.
+Version 0.4.0 enables the Supervisor API with `hassio_role: manager`. This is intentionally narrower than the unrestricted `admin` role while still allowing the connector to inspect Home Assistant Core, apps/add-ons, backups, hardware, host information and logs.
 
 Operations that can change the installation should be exposed as explicit MCP tools with validation and confirmation. In Admin API v2, creating a full backup requires `confirm=true`.
 
@@ -50,3 +50,14 @@ Admin API v2 currently focuses on inspection, diagnostics and backup creation. A
 ## Restricted config file access
 
 Version 0.3.1 mounts the Home Assistant `config` directory read/write so the connector can maintain web assets. The MCP write surface remains intentionally restricted in code to `/config/www/`; paths resolving outside that directory are rejected. This allows updates such as `/config/www/apto3d/index.html` without exposing a generic filesystem writer.
+
+
+## APTO3D custom component access
+
+Version 0.4.0 adds a separate, project-scoped file surface for the Digital Twin custom component:
+
+- `read_apto3d_component_file(path)`
+- `write_apto3d_component_file(path, content)`
+- `list_apto3d_component_files()`
+
+These tools are confined to `/config/custom_components/apto3d/`. Writes remain atomic and the existing `write_config_file` restriction to `/config/www/` is unchanged. Canonical path checks reject traversal and symlink escapes. Allowed component files are root-level `.py`, `manifest.json`, `strings.json`, and `translations/*.json`.

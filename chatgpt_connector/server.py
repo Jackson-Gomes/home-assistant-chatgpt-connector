@@ -9,6 +9,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from ha_client import HomeAssistantClient, HomeAssistantError
+from apto3d_files import list_component_files, read_component_file, write_component_file
 
 mcp = FastMCP("home-assistant-chatgpt-connector", host="0.0.0.0", port=8000)
 
@@ -91,6 +92,34 @@ async def write_config_file(path: str, content: str) -> dict[str, Any]:
         os.replace(temp, target)
         return {"ok": True, "path": str(target), "bytes": len(content.encode("utf-8"))}
     except (OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+async def read_apto3d_component_file(path: str, max_chars: int = 500000) -> dict[str, Any]:
+    """Read an allowed UTF-8 file only from /config/custom_components/apto3d/."""
+    try:
+        return {"ok": True, **read_component_file(path, max_chars=max_chars)}
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+async def write_apto3d_component_file(path: str, content: str) -> dict[str, Any]:
+    """Atomically write an allowed file only inside /config/custom_components/apto3d/."""
+    try:
+        return {"ok": True, **write_component_file(path, content)}
+    except (OSError, UnicodeEncodeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+async def list_apto3d_component_files() -> dict[str, Any]:
+    """List allowed regular files inside the APTO3D custom component directory."""
+    try:
+        files = list_component_files()
+        return {"ok": True, "count": len(files), "files": files}
+    except OSError as exc:
         return {"ok": False, "error": str(exc)}
 
 
@@ -372,7 +401,7 @@ async def save_dashboard(
 
 
 async def startup_check() -> bool:
-    print("ChatGPT Connector 0.3.1 starting...", flush=True)
+    print("ChatGPT Connector 0.4.0 starting...", flush=True)
     try:
         ha = client()
         info = await ha.check_api()
@@ -383,7 +412,8 @@ async def startup_check() -> bool:
         )
         print(f"Entities accessible: {len(states)}", flush=True)
         print(
-            "MCP tools: read_config_file, write_config_file, ha_health, list_entities, get_entity_state, list_services, "
+            "MCP tools: read_config_file, write_config_file, read_apto3d_component_file, "
+            "write_apto3d_component_file, list_apto3d_component_files, ha_health, list_entities, get_entity_state, list_services, "
             "get_history, get_logbook, get_error_log, call_service, "
             "get_automation_config, save_automation, get_script_config, save_script, "
             "update_entity, get_dashboard, save_dashboard",
