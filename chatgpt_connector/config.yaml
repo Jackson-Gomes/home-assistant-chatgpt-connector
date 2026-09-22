@@ -1,5 +1,5 @@
 name: ChatGPT Connector
-version: "0.5.0"
+version: "0.6.0"
 slug: chatgpt_connector
 description: MCP connector between ChatGPT and Home Assistant using OpenAI Secure MCP Tunnel
 url: https://github.com/Jackson-Gomes/home-assistant-chatgpt-connector
@@ -21,6 +21,26 @@ ports_description:
 options:
   tunnel_id: ""
   tunnel_api_key: ""
+  brain_enabled: false
+  brain_ai_task_entity: "ai_task.codex_assist_ai_task"
+  brain_batch_seconds: 45
+  brain_min_events_per_batch: 2
+  brain_max_ai_calls_per_hour: 4
+  brain_max_ai_calls_per_day: 30
+  brain_tracked_domains: "binary_sensor,person,light,switch,media_player,vacuum,climate,cover,lock"
+  brain_announce_enabled: false
+  brain_announce_service: "notify.alexa_media_alexa"
+  brain_notify_suggestions: false
 schema:
   tunnel_id: str
   tunnel_api_key: password
+  brain_enabled: bool
+  brain_ai_task_entity: str
+  brain_batch_seconds: int
+  brain_min_events_per_batch: int
+  brain_max_ai_calls_per_hour: int
+  brain_max_ai_calls_per_day: int
+  brain_tracked_domains: str
+  brain_announce_enabled: bool
+  brain_announce_service: str
+  brain_notify_suggestions: bool

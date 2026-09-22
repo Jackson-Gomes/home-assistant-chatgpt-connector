@@ -5,10 +5,12 @@ import sys
 from typing import Any
 
 from assist_admin import register_assist_tools
+from brain_admin import register_brain_tools
 from ha_client import HomeAssistantError
 from server import _clean_identifier, client, mcp
 
 register_assist_tools(mcp, client)
+register_brain_tools(mcp)
 
 
 @mcp.tool()
@@ -175,7 +177,10 @@ async def get_admin_logs(
 
 
 async def startup_check() -> bool:
-    print("ChatGPT Connector 0.5.0 (Admin API v2 + Assist Admin) starting...", flush=True)
+    print(
+        "ChatGPT Connector 0.6.0 (Admin API v2 + Assist Admin + Brain Foundation) starting...",
+        flush=True,
+    )
     try:
         ha = client()
         core = await ha.check_api()
@@ -196,7 +201,8 @@ async def startup_check() -> bool:
             "list_backups, create_full_backup, get_admin_job, get_admin_logs; "
             "Assist tools: list_assist_pipelines, update_assist_pipeline, "
             "list_assist_exposed_entities, set_assist_entity_exposure, "
-            "set_assist_exposed_entities",
+            "set_assist_exposed_entities; "
+            "Brain tools: brain_status, brain_recent_events, brain_suggestions",
             flush=True,
         )
         return True
