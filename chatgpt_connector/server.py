@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import os
 import subprocess
 import sys
@@ -395,6 +397,111 @@ async def call_service(
         return {"ok": False, "error": str(exc)}
 
 
+def _decode_print_upload(filename: str, content_base64: str) -> Path:
+    """Decode one printable attachment into the connector-controlled print folder."""
+    safe_name = Path(filename.strip()).name
+    if not safe_name or safe_name in {".", ".."}:
+        raise ValueError("filename is required.")
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in _PRINT_EXTENSIONS:
+        raise ValueError("print file must be PDF, PNG, JPG, or JPEG.")
+    if len(content_base64) > ((_PRINT_MAX_BYTES * 4 // 3) + 4096):
+        raise ValueError("encoded print file is too large.")
+    try:
+        data = base64.b64decode(content_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("content_base64 is not valid base64.") from exc
+    if not data or len(data) > _PRINT_MAX_BYTES:
+        raise ValueError("print file must be between 1 byte and 25 MB.")
+
+    signatures = {
+        ".pdf": lambda b: b.startswith(b"%PDF-"),
+        ".png": lambda b: b.startswith(b"\\x89PNG\\r\\n\\x1a\\n"),
+        ".jpg": lambda b: b.startswith(b"\\xff\\xd8\\xff"),
+        ".jpeg": lambda b: b.startswith(b"\\xff\\xd8\\xff"),
+    }
+    if not signatures[suffix](data):
+        raise ValueError("file content does not match its declared PDF/PNG/JPEG type.")
+
+    upload_dir = (_PRINT_ROOT / "chatgpt_print").resolve()
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    token = os.urandom(8).hex()
+    target = upload_dir / f"{token}{suffix}"
+    temp = target.with_suffix(target.suffix + ".tmp")
+    temp.write_bytes(data)
+    os.replace(temp, target)
+    return target
+
+
+async def _submit_print_job(
+    target: Path,
+    copies: int,
+    media: str,
+    color: bool,
+    duplex: bool,
+) -> dict[str, Any]:
+    copies = max(1, min(int(copies), 10))
+    clean_media = media.strip()
+    if not clean_media or len(clean_media) > 40 or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-." for ch in clean_media):
+        raise ValueError("Invalid media name.")
+    args = [
+        "lp", "-d", "ChatGPT_Printer",
+        "-n", str(copies),
+        "-o", f"media={clean_media}",
+        "-o", "print-color-mode=color" if color else "print-color-mode=monochrome",
+        "-o", "sides=two-sided-long-edge" if duplex else "sides=one-sided",
+        str(target),
+    ]
+    env = os.environ.copy()
+    env["DEVICE_URI"] = _printer_uri()
+    proc = await asyncio.to_thread(
+        subprocess.run, args, capture_output=True, text=True, timeout=60, env=env
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "lp failed").strip())
+    return {
+        "ok": True,
+        "printer_uri": _printer_uri(),
+        "path": str(target),
+        "copies": copies,
+        "media": clean_media,
+        "color": color,
+        "duplex": duplex,
+        "job": proc.stdout.strip(),
+    }
+
+
+@mcp.tool()
+async def upload_and_print_document(
+    filename: str,
+    content_base64: str,
+    copies: int = 1,
+    media: str = "A4",
+    color: bool = True,
+    duplex: bool = False,
+) -> dict[str, Any]:
+    """Upload a PDF/JPEG/PNG attachment as base64 and print it immediately.
+
+    The file is validated, limited to 25 MB, stored only under
+    /config/www/chatgpt_print, submitted to the fixed printer queue, and then
+    deleted after CUPS accepts the job.
+    """
+    target: Path | None = None
+    try:
+        target = _decode_print_upload(filename, content_base64)
+        result = await _submit_print_job(target, copies, media, color, duplex)
+        result["uploaded_filename"] = Path(filename).name
+        return result
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "error": str(exc)}
+    finally:
+        if target is not None:
+            try:
+                target.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 @mcp.tool()
 async def print_document(
     path: str,
@@ -411,36 +518,7 @@ async def print_document(
     """
     try:
         target = _resolve_print_path(path)
-        copies = max(1, min(int(copies), 10))
-        clean_media = media.strip()
-        if not clean_media or len(clean_media) > 40 or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-." for ch in clean_media):
-            raise ValueError("Invalid media name.")
-
-        args = [
-            "lp", "-d", "ChatGPT_Printer",
-            "-n", str(copies),
-            "-o", f"media={clean_media}",
-            "-o", "print-color-mode=color" if color else "print-color-mode=monochrome",
-            "-o", "sides=two-sided-long-edge" if duplex else "sides=one-sided",
-            str(target),
-        ]
-        env = os.environ.copy()
-        env["DEVICE_URI"] = _printer_uri()
-        proc = await asyncio.to_thread(
-            subprocess.run, args, capture_output=True, text=True, timeout=60, env=env
-        )
-        if proc.returncode != 0:
-            raise RuntimeError((proc.stderr or proc.stdout or "lp failed").strip())
-        return {
-            "ok": True,
-            "printer_uri": _printer_uri(),
-            "path": str(target),
-            "copies": copies,
-            "media": clean_media,
-            "color": color,
-            "duplex": duplex,
-            "job": proc.stdout.strip(),
-        }
+        return await _submit_print_job(target, copies, media, color, duplex)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         return {"ok": False, "error": str(exc)}
 
