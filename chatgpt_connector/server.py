@@ -12,7 +12,9 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
+import httpx
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel
 
 from ha_client import HomeAssistantClient, HomeAssistantError
 from apto3d_files import list_component_files, read_component_file, write_component_file
@@ -84,7 +86,6 @@ async def _resolve_entity(value: str, domain: str | None = None) -> str:
         matches = [item for item in matches if item.startswith(f"{domain}.")]
 
     if not matches:
-        # One forced refresh handles newly created or renamed entities immediately.
         await _refresh_entity_cache(force=True)
         matches = list(dict.fromkeys(_ENTITY_CACHE.get(normalized, [])))
         if domain:
@@ -145,6 +146,18 @@ def _resolve_config_path(path: str, *, write: bool = False) -> Path:
 _PRINT_ROOT = Path("/config/www").resolve()
 _PRINT_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 _PRINT_MAX_BYTES = 25 * 1024 * 1024
+_PRINT_MIME_EXTENSIONS = {
+    "application/pdf": ".pdf",
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+}
+
+
+class OpenAIFileInput(BaseModel):
+    download_url: str
+    file_id: str
+    mime_type: str | None = None
+    file_name: str | None = None
 
 
 def _resolve_print_path(path: str) -> Path:
@@ -180,7 +193,7 @@ async def read_config_file(path: str, max_chars: int = 500000) -> dict[str, Any]
         if not target.is_file():
             raise ValueError("file does not exist or is not a regular file.")
         data = target.read_bytes()
-        if b"\\x00" in data:
+        if b"\x00" in data:
             raise ValueError("binary files are not supported.")
         content = data.decode("utf-8")
         return {"ok": True, "path": str(target), "truncated": len(content) > max_chars, "content": content[:max_chars]}
@@ -397,28 +410,21 @@ async def call_service(
         return {"ok": False, "error": str(exc)}
 
 
-def _decode_print_upload(filename: str, content_base64: str) -> Path:
-    """Decode one printable attachment into the connector-controlled print folder."""
+def _store_print_bytes(filename: str, data: bytes) -> Path:
     safe_name = Path(filename.strip()).name
     if not safe_name or safe_name in {".", ".."}:
         raise ValueError("filename is required.")
     suffix = Path(safe_name).suffix.lower()
     if suffix not in _PRINT_EXTENSIONS:
         raise ValueError("print file must be PDF, PNG, JPG, or JPEG.")
-    if len(content_base64) > ((_PRINT_MAX_BYTES * 4 // 3) + 4096):
-        raise ValueError("encoded print file is too large.")
-    try:
-        data = base64.b64decode(content_base64, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise ValueError("content_base64 is not valid base64.") from exc
     if not data or len(data) > _PRINT_MAX_BYTES:
         raise ValueError("print file must be between 1 byte and 25 MB.")
 
     signatures = {
         ".pdf": lambda b: b.startswith(b"%PDF-"),
-        ".png": lambda b: b.startswith(b"\\x89PNG\\r\\n\\x1a\\n"),
-        ".jpg": lambda b: b.startswith(b"\\xff\\xd8\\xff"),
-        ".jpeg": lambda b: b.startswith(b"\\xff\\xd8\\xff"),
+        ".png": lambda b: b.startswith(b"\x89PNG\r\n\x1a\n"),
+        ".jpg": lambda b: b.startswith(b"\xff\xd8\xff"),
+        ".jpeg": lambda b: b.startswith(b"\xff\xd8\xff"),
     }
     if not signatures[suffix](data):
         raise ValueError("file content does not match its declared PDF/PNG/JPEG type.")
@@ -431,6 +437,61 @@ def _decode_print_upload(filename: str, content_base64: str) -> Path:
     temp.write_bytes(data)
     os.replace(temp, target)
     return target
+
+
+def _decode_print_upload(filename: str, content_base64: str) -> Path:
+    """Decode one printable attachment into the connector-controlled print folder."""
+    if len(content_base64) > ((_PRINT_MAX_BYTES * 4 // 3) + 4096):
+        raise ValueError("encoded print file is too large.")
+    try:
+        data = base64.b64decode(content_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("content_base64 is not valid base64.") from exc
+    return _store_print_bytes(filename, data)
+
+
+def _attachment_filename(file: OpenAIFileInput) -> str:
+    if file.file_name:
+        safe_name = Path(file.file_name.strip()).name
+        if Path(safe_name).suffix.lower() in _PRINT_EXTENSIONS:
+            return safe_name
+
+    mime = (file.mime_type or "").split(";", 1)[0].strip().lower()
+    suffix = _PRINT_MIME_EXTENSIONS.get(mime)
+    if suffix:
+        return f"attachment{suffix}"
+    raise ValueError("attached file must be PDF, PNG, JPG, or JPEG.")
+
+
+async def _download_print_attachment(file: OpenAIFileInput) -> Path:
+    """Download a ChatGPT-authorized file parameter and store it temporarily for printing."""
+    url = file.download_url.strip()
+    if not url.lower().startswith("https://"):
+        raise ValueError("file download URL must use HTTPS.")
+
+    timeout = httpx.Timeout(30.0, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as http:
+        async with http.stream("GET", url) as response:
+            response.raise_for_status()
+            if response.url.scheme.lower() != "https":
+                raise ValueError("file download redirect must remain on HTTPS.")
+
+            declared = response.headers.get("content-length")
+            if declared:
+                try:
+                    if int(declared) > _PRINT_MAX_BYTES:
+                        raise ValueError("print file must be 25 MB or smaller.")
+                except ValueError as exc:
+                    if str(exc) == "print file must be 25 MB or smaller.":
+                        raise
+
+            data = bytearray()
+            async for chunk in response.aiter_bytes():
+                if len(data) + len(chunk) > _PRINT_MAX_BYTES:
+                    raise ValueError("print file must be 25 MB or smaller.")
+                data.extend(chunk)
+
+    return _store_print_bytes(_attachment_filename(file), bytes(data))
 
 
 async def _submit_print_job(
@@ -471,6 +532,36 @@ async def _submit_print_job(
     }
 
 
+@mcp.tool(meta={"openai/fileParams": ["file"]})
+async def print_attachment(
+    file: OpenAIFileInput,
+    copies: int = 1,
+    media: str = "A4",
+    color: bool = True,
+    duplex: bool = False,
+) -> dict[str, Any]:
+    """Print a PDF/JPEG/PNG file attached by the user directly from ChatGPT.
+
+    ChatGPT supplies a temporary authorized download URL through the file parameter.
+    The connector downloads, validates, prints, and deletes the temporary local copy.
+    """
+    target: Path | None = None
+    try:
+        target = await _download_print_attachment(file)
+        result = await _submit_print_job(target, copies, media, color, duplex)
+        result["uploaded_filename"] = _attachment_filename(file)
+        result["file_id"] = file.file_id
+        return result
+    except (httpx.HTTPError, OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "error": str(exc)}
+    finally:
+        if target is not None:
+            try:
+                target.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 @mcp.tool()
 async def upload_and_print_document(
     filename: str,
@@ -482,9 +573,7 @@ async def upload_and_print_document(
 ) -> dict[str, Any]:
     """Upload a PDF/JPEG/PNG attachment as base64 and print it immediately.
 
-    The file is validated, limited to 25 MB, stored only under
-    /config/www/chatgpt_print, submitted to the fixed printer queue, and then
-    deleted after CUPS accepts the job.
+    Kept as a compatibility fallback. Prefer print_attachment for normal ChatGPT files.
     """
     target: Path | None = None
     try:
@@ -648,7 +737,7 @@ async def save_dashboard(
 
 
 async def startup_check() -> bool:
-    print("ChatGPT Connector 0.4.0 starting...", flush=True)
+    print("ChatGPT Connector 0.8.2 starting...", flush=True)
     try:
         ha = client()
         info = await ha.check_api()
@@ -663,7 +752,7 @@ async def startup_check() -> bool:
         print(
             "MCP tools: read_config_file, write_config_file, read_apto3d_component_file, "
             "write_apto3d_component_file, list_apto3d_component_files, ha_health, list_entities, get_entity_state, list_services, "
-            "get_history, get_logbook, get_error_log, call_service, print_document, "
+            "get_history, get_logbook, get_error_log, call_service, print_attachment, upload_and_print_document, print_document, "
             "get_automation_config, save_automation, get_script_config, save_script, "
             "update_entity, get_dashboard, save_dashboard",
             flush=True,
