@@ -7,6 +7,14 @@ from typing import Any
 from assist_admin import register_assist_tools
 from brain_admin import register_brain_tools
 from ha_client import HomeAssistantError
+from printer_control import (
+    cancel_job as cancel_printer_job_impl,
+    get_capabilities as get_printer_capabilities_impl,
+    identify as identify_printer_impl,
+    queue_control as printer_queue_control_impl,
+    queue_status as printer_queue_status_impl,
+    wake as wake_printer_impl,
+)
 from server import _clean_identifier, client, mcp
 
 register_assist_tools(mcp, client)
@@ -176,9 +184,70 @@ async def get_admin_logs(
         return {"ok": False, "error": str(exc)}
 
 
+@mcp.tool()
+async def printer_capabilities() -> dict[str, Any]:
+    """Probe the configured printer over IPP and return only capabilities it actually advertises."""
+    try:
+        return {"ok": True, **(await get_printer_capabilities_impl())}
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+async def printer_identify(
+    action: str = "flash",
+    message: str = "ChatGPT connected",
+) -> dict[str, Any]:
+    """Identify the printer without printing.
+
+    action can be flash, display, sound, or speak. The command is sent only when
+    the real printer advertises both Identify-Printer and the requested action.
+    """
+    try:
+        return await identify_printer_impl(action=action, message=message)
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+async def printer_wake() -> dict[str, Any]:
+    """Wake/activate the printer only if it advertises a standard IPP wake operation."""
+    try:
+        return await wake_printer_impl()
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+async def printer_queue_status() -> dict[str, Any]:
+    """Read the local CUPS queue state and pending ChatGPT printer jobs."""
+    try:
+        return await printer_queue_status_impl()
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+async def printer_queue_control(action: str) -> dict[str, Any]:
+    """Control the local print queue. action: pause, resume, or cancel_all."""
+    try:
+        return await printer_queue_control_impl(action)
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+async def printer_cancel_job(job_id: str) -> dict[str, Any]:
+    """Cancel one pending job from the connector's local CUPS queue."""
+    try:
+        return await cancel_printer_job_impl(job_id)
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 async def startup_check() -> bool:
     print(
-        "ChatGPT Connector 0.6.0 (Admin API v2 + Assist Admin + Brain Foundation) starting...",
+        "ChatGPT Connector 0.8.0 (Admin API v2 + Assist + Brain + IPP printer controls) starting...",
         flush=True,
     )
     try:
@@ -199,6 +268,8 @@ async def startup_check() -> bool:
             "Admin v2 tools enabled: admin_health, list_devices, list_integrations, "
             "list_addons, get_addon_info, get_hardware_info, get_host_info, "
             "list_backups, create_full_backup, get_admin_job, get_admin_logs; "
+            "Printer tools: printer_capabilities, printer_identify, printer_wake, "
+            "printer_queue_status, printer_queue_control, printer_cancel_job; "
             "Assist tools: list_assist_pipelines, update_assist_pipeline, "
             "list_assist_exposed_entities, set_assist_entity_exposure, "
             "set_assist_exposed_entities; "
