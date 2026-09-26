@@ -2,7 +2,7 @@ ARG BUILD_FROM
 FROM $BUILD_FROM
 
 WORKDIR /app
-RUN apk add --no-cache curl unzip cups cups-client cups-filters
+RUN apk add --no-cache curl unzip cups cups-client cups-filters ipptool
 COPY requirements.txt /app/requirements.txt
 RUN pip3 install --no-cache-dir -r /app/requirements.txt
 
@@ -19,7 +19,7 @@ RUN arch="$(uname -m)" && \
     test -n "$bin" && install -m 0755 "$bin" /usr/local/bin/tunnel-client && \
     rm -rf /tmp/tunnel-client /tmp/tunnel-client.zip
 
-COPY ha_client.py server.py admin_server.py apto3d_files.py assist_admin.py brain_admin.py brain_service.py /app/
+COPY ha_client.py server.py admin_server.py apto3d_files.py assist_admin.py brain_admin.py brain_service.py printer_control.py /app/
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 CMD ["/run.sh"]
