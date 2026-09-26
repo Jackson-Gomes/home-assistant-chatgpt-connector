@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +16,83 @@ from apto3d_files import list_component_files, read_component_file, write_compon
 mcp = FastMCP("home-assistant-chatgpt-connector", host="0.0.0.0", port=8000)
 
 
+_HA_CLIENT: HomeAssistantClient | None = None
+_ENTITY_CACHE: dict[str, list[str]] = {}
+_ENTITY_CACHE_BY_ID: set[str] = set()
+_ENTITY_CACHE_UPDATED = 0.0
+_ENTITY_CACHE_TTL = 300.0
+
+
 def client() -> HomeAssistantClient:
-    return HomeAssistantClient()
+    global _HA_CLIENT
+    if _HA_CLIENT is None:
+        _HA_CLIENT = HomeAssistantClient()
+    return _HA_CLIENT
+
+
+def _normalize_entity_name(value: str) -> str:
+    value = unicodedata.normalize("NFKD", value.strip().lower())
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return " ".join(value.replace("_", " ").replace("-", " ").split())
+
+
+async def _refresh_entity_cache(force: bool = False) -> None:
+    global _ENTITY_CACHE, _ENTITY_CACHE_BY_ID, _ENTITY_CACHE_UPDATED
+    if not force and _ENTITY_CACHE and time.monotonic() - _ENTITY_CACHE_UPDATED < _ENTITY_CACHE_TTL:
+        return
+
+    states = await client().list_states()
+    cache: dict[str, list[str]] = {}
+    ids: set[str] = set()
+    for state in states:
+        entity_id = str(state.get("entity_id") or "").strip().lower()
+        if not entity_id:
+            continue
+        ids.add(entity_id)
+        attributes = state.get("attributes") or {}
+        friendly_name = str(attributes.get("friendly_name") or "").strip()
+        object_id = entity_id.split(".", 1)[1] if "." in entity_id else entity_id
+        keys = {entity_id, object_id}
+        if friendly_name:
+            keys.add(friendly_name)
+        for key in keys:
+            normalized = _normalize_entity_name(key)
+            if normalized:
+                cache.setdefault(normalized, []).append(entity_id)
+
+    _ENTITY_CACHE = cache
+    _ENTITY_CACHE_BY_ID = ids
+    _ENTITY_CACHE_UPDATED = time.monotonic()
+
+
+async def _resolve_entity(value: str, domain: str | None = None) -> str:
+    raw = value.strip().lower()
+    await _refresh_entity_cache()
+
+    if raw in _ENTITY_CACHE_BY_ID:
+        if domain and not raw.startswith(f"{domain}."):
+            raise ValueError(f"Entity {raw!r} is not in domain {domain!r}.")
+        return raw
+
+    normalized = _normalize_entity_name(value)
+    matches = list(dict.fromkeys(_ENTITY_CACHE.get(normalized, [])))
+    if domain:
+        matches = [item for item in matches if item.startswith(f"{domain}.")]
+
+    if not matches:
+        # One forced refresh handles newly created or renamed entities immediately.
+        await _refresh_entity_cache(force=True)
+        matches = list(dict.fromkeys(_ENTITY_CACHE.get(normalized, [])))
+        if domain:
+            matches = [item for item in matches if item.startswith(f"{domain}.")]
+
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError(f"No entity found for name {value!r}.")
+    raise ValueError(
+        f"Ambiguous entity name {value!r}; matches: {', '.join(matches)}"
+    )
 
 
 def _clean_identifier(value: str, label: str, *, allow_hyphen: bool = False) -> str:
@@ -246,10 +323,16 @@ async def call_service(
     service: str,
     entity_id: str | None = None,
     data: dict[str, Any] | None = None,
+    entity_name: str | None = None,
 ) -> dict[str, Any]:
     """Call any Home Assistant service.
 
+    Prefer entity_id when known. Otherwise pass entity_name using the Home Assistant
+    friendly name; it is resolved from the in-memory entity cache without requiring
+    a list_entities call first.
+
     Examples:
+      light.turn_on + entity_name="abajur escritorio"
       light.turn_on + light.luz_da_sala + {"brightness_pct": 50}
       switch.turn_off + switch.impressora_3d_socket_1
       script.turn_on + script.aspirar_sala
@@ -257,7 +340,12 @@ async def call_service(
     try:
         clean_domain = _clean_identifier(domain, "domain")
         clean_service = _clean_identifier(service, "service")
-        clean_entity_id = _clean_entity_id(entity_id) if entity_id else None
+        if entity_id and entity_name:
+            raise ValueError("Use entity_id or entity_name, not both.")
+        if entity_name:
+            clean_entity_id = await _resolve_entity(entity_name, clean_domain)
+        else:
+            clean_entity_id = _clean_entity_id(entity_id) if entity_id else None
 
         result = await client().call_service(
             clean_domain,
@@ -406,11 +494,13 @@ async def startup_check() -> bool:
         ha = client()
         info = await ha.check_api()
         states = await ha.list_states()
+        await _refresh_entity_cache(force=True)
         print(
             f"Home Assistant API: OK ({info.get('message', 'authenticated')})",
             flush=True,
         )
         print(f"Entities accessible: {len(states)}", flush=True)
+        print(f"Entity name cache: {len(_ENTITY_CACHE)} names/IDs cached", flush=True)
         print(
             "MCP tools: read_config_file, write_config_file, read_apto3d_component_file, "
             "write_apto3d_component_file, list_apto3d_component_files, ha_health, list_entities, get_entity_state, list_services, "
