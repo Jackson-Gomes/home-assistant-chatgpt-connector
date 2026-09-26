@@ -4,6 +4,16 @@ set -e
 export HA_URL="http://supervisor/core"
 export HA_TOKEN="$SUPERVISOR_TOKEN"
 export SUPERVISOR_URL="http://supervisor"
+export PRINTER_URI="${PRINTER_URI:-ipp://192.168.0.104/ipp/print}"
+
+# Local CUPS is used only as an IPP transport to the configured network printer.
+mkdir -p /run/cups
+cupsd
+sleep 1
+lpadmin -x ChatGPT_Printer >/dev/null 2>&1 || true
+lpadmin -p ChatGPT_Printer -E -v "$PRINTER_URI" -m everywhere
+lpoptions -d ChatGPT_Printer
+bashio::log.info "IPP printer ready: $PRINTER_URI"
 
 TUNNEL_ID="$(bashio::config 'tunnel_id')"
 TUNNEL_API_KEY="$(bashio::config 'tunnel_api_key')"
