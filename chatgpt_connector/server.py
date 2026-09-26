@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
+import tempfile
 import time
 import unicodedata
 from pathlib import Path
@@ -136,6 +138,35 @@ def _resolve_config_path(path: str, *, write: bool = False) -> Path:
         scope = "/config/www/" if write else "/config/"
         raise ValueError(f"path must stay inside {scope}") from exc
     return resolved
+
+
+_PRINT_ROOT = Path("/config/www").resolve()
+_PRINT_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+_PRINT_MAX_BYTES = 25 * 1024 * 1024
+
+
+def _resolve_print_path(path: str) -> Path:
+    """Resolve a printable file while keeping access inside /config/www."""
+    target = _resolve_config_path(path)
+    try:
+        target.relative_to(_PRINT_ROOT)
+    except ValueError as exc:
+        raise ValueError("print file must stay inside /config/www/") from exc
+    if target.suffix.lower() not in _PRINT_EXTENSIONS:
+        raise ValueError("print file must be PDF, PNG, JPG, or JPEG.")
+    if not target.is_file():
+        raise ValueError("print file does not exist or is not a regular file.")
+    size = target.stat().st_size
+    if size <= 0 or size > _PRINT_MAX_BYTES:
+        raise ValueError("print file must be between 1 byte and 25 MB.")
+    return target
+
+
+def _printer_uri() -> str:
+    uri = os.environ.get("PRINTER_URI", "ipp://192.168.0.104/ipp/print").strip()
+    if not (uri.startswith("ipp://") or uri.startswith("ipps://")):
+        raise ValueError("PRINTER_URI must use ipp:// or ipps://.")
+    return uri
 
 
 @mcp.tool()
@@ -365,6 +396,56 @@ async def call_service(
 
 
 @mcp.tool()
+async def print_document(
+    path: str,
+    copies: int = 1,
+    media: str = "A4",
+    color: bool = True,
+    duplex: bool = False,
+) -> dict[str, Any]:
+    """Print a PDF/JPEG/PNG stored under /config/www using the configured IPP printer.
+
+    The printer destination is fixed by PRINTER_URI (default: the discovered HP
+    DeskJet 2600 at ipp://192.168.0.104/ipp/print). No arbitrary command or
+    destination is accepted from the MCP caller.
+    """
+    try:
+        target = _resolve_print_path(path)
+        copies = max(1, min(int(copies), 10))
+        clean_media = media.strip()
+        if not clean_media or len(clean_media) > 40 or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-." for ch in clean_media):
+            raise ValueError("Invalid media name.")
+
+        args = [
+            "lp", "-d", "ChatGPT_Printer",
+            "-n", str(copies),
+            "-o", f"media={clean_media}",
+            "-o", "print-color-mode=color" if color else "print-color-mode=monochrome",
+            "-o", "sides=two-sided-long-edge" if duplex else "sides=one-sided",
+            str(target),
+        ]
+        env = os.environ.copy()
+        env["DEVICE_URI"] = _printer_uri()
+        proc = await asyncio.to_thread(
+            subprocess.run, args, capture_output=True, text=True, timeout=60, env=env
+        )
+        if proc.returncode != 0:
+            raise RuntimeError((proc.stderr or proc.stdout or "lp failed").strip())
+        return {
+            "ok": True,
+            "printer_uri": _printer_uri(),
+            "path": str(target),
+            "copies": copies,
+            "media": clean_media,
+            "color": color,
+            "duplex": duplex,
+            "job": proc.stdout.strip(),
+        }
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
 async def get_automation_config(automation_id: str) -> dict[str, Any]:
     """Read the persistent Home Assistant automation configuration by automation ID."""
     try:
@@ -504,7 +585,7 @@ async def startup_check() -> bool:
         print(
             "MCP tools: read_config_file, write_config_file, read_apto3d_component_file, "
             "write_apto3d_component_file, list_apto3d_component_files, ha_health, list_entities, get_entity_state, list_services, "
-            "get_history, get_logbook, get_error_log, call_service, "
+            "get_history, get_logbook, get_error_log, call_service, print_document, "
             "get_automation_config, save_automation, get_script_config, save_script, "
             "update_entity, get_dashboard, save_dashboard",
             flush=True,
