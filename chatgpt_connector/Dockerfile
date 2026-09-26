@@ -2,7 +2,8 @@ ARG BUILD_FROM
 FROM $BUILD_FROM
 
 WORKDIR /app
-RUN apk add --no-cache curl unzip
+RUN apk add --no-cache curl unzip cups cups-client cups-filters
+RUN printf 'ChatGPT_Printer ipp://192.168.0.104/ipp/print everywhere\n' > /etc/printcap || true
 COPY requirements.txt /app/requirements.txt
 RUN pip3 install --no-cache-dir -r /app/requirements.txt
 
