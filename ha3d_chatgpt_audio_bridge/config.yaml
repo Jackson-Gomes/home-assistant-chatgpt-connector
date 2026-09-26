@@ -1,0 +1,23 @@
+name: HA3D ChatGPT Audio Bridge
+version: "0.1.0"
+slug: ha3d_chatgpt_audio_bridge
+description: Routes HA3D microphone audio into a PulseAudio virtual microphone for a Chromium-hosted ChatGPT Voice session
+url: https://github.com/Jackson-Gomes/home-assistant-chatgpt-connector
+startup: application
+boot: auto
+init: false
+audio: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:microphone-message
+panel_admin: true
+arch:
+  - amd64
+options:
+  source_name: ha3d_chatgpt_mic
+  sample_rate: 48000
+  set_default_source: true
+schema:
+  source_name: str
+  sample_rate: int
+  set_default_source: bool
