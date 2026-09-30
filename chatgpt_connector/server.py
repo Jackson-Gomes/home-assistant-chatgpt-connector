@@ -505,6 +505,20 @@ async def _submit_print_job(
     clean_media = media.strip()
     if not clean_media or len(clean_media) > 40 or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-." for ch in clean_media):
         raise ValueError("Invalid media name.")
+    # A new print request replaces any stale local jobs. This prevents old
+    # failed jobs from blocking the DeskJet and keeps the queue deterministic.
+    for queue_cmd in (
+        ["cancel", "-a", "ChatGPT_Printer"],
+        ["cupsenable", "ChatGPT_Printer"],
+    ):
+        queue_proc = await asyncio.to_thread(
+            subprocess.run, queue_cmd, capture_output=True, text=True, timeout=15
+        )
+        if queue_proc.returncode != 0:
+            raise RuntimeError(
+                (queue_proc.stderr or queue_proc.stdout or f"{queue_cmd[0]} failed").strip()
+            )
+
     args = [
         "lp", "-d", "ChatGPT_Printer",
         "-n", str(copies),
@@ -737,7 +751,7 @@ async def save_dashboard(
 
 
 async def startup_check() -> bool:
-    print("ChatGPT Connector 0.8.2 starting...", flush=True)
+    print("ChatGPT Connector 0.8.3 starting...", flush=True)
     try:
         ha = client()
         info = await ha.check_api()
