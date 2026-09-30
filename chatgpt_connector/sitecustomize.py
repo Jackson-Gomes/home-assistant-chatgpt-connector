@@ -58,6 +58,11 @@ class _InstrumentedMCPEventsRuntime(MCPEventsRuntime):
             }
             for method in self._TRACKED_METHODS
         }
+        self._discovery: dict[str, Any] = {
+            "captured_at": None,
+            "python_type": None,
+            "payload": None,
+        }
 
         # Keep the existing public diagnostic tool, but enrich it without adding
         # another MCP tool or exposing callback URLs/secrets.
@@ -66,6 +71,11 @@ class _InstrumentedMCPEventsRuntime(MCPEventsRuntime):
         def status_with_rpc() -> dict[str, Any]:
             payload = base_status()
             payload["rpc"] = {method: dict(data) for method, data in self._rpc.items()}
+            payload["discovery"] = {
+                "captured_at": self._discovery["captured_at"],
+                "python_type": self._discovery["python_type"],
+                "payload": self._discovery["payload"],
+            }
             return payload
 
         self.store.status = status_with_rpc  # type: ignore[method-assign]
@@ -89,6 +99,19 @@ class _InstrumentedMCPEventsRuntime(MCPEventsRuntime):
                 diagnostic["last_error_at"] = _utc_iso()
                 diagnostic["last_error"] = f"{type(exc).__name__}: {exc}"
             raise
+
+        if method == "server/discover":
+            if isinstance(result, dict):
+                discovery_payload: Any = dict(result)
+            elif hasattr(result, "model_dump"):
+                discovery_payload = result.model_dump(by_alias=True, exclude_none=True)
+            else:
+                discovery_payload = {"repr": repr(result)[:8000]}
+            self._discovery = {
+                "captured_at": _utc_iso(),
+                "python_type": type(result).__name__,
+                "payload": discovery_payload,
+            }
 
         if diagnostic is not None:
             diagnostic["successes"] += 1
@@ -116,7 +139,7 @@ class FastMCP(MCPServer):
         middleware = list(kwargs.pop("middleware", ()) or ())
         middleware.append(runtime.capability_middleware)
 
-        kwargs.setdefault("version", "0.9.1-beta")
+        kwargs.setdefault("version", "0.9.2-beta")
         if kwargs.get("lifespan") is None:
             kwargs["lifespan"] = runtime.lifespan
         super().__init__(
