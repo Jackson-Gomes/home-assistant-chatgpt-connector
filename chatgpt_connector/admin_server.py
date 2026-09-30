@@ -4,10 +4,13 @@ import asyncio
 import sys
 from typing import Any
 
+import server as server_module
 from assist_admin import register_assist_tools
 from brain_admin import register_brain_tools
 from ha_client import HomeAssistantError
 from printer_control import (
+    _run_ipptool,
+    _simple_operation_test,
     cancel_job as cancel_printer_job_impl,
     get_capabilities as get_printer_capabilities_impl,
     identify as identify_printer_impl,
@@ -19,6 +22,77 @@ from server import _clean_identifier, client, mcp
 
 register_assist_tools(mcp, client)
 register_brain_tools(mcp)
+
+
+_original_submit_print_job = server_module._submit_print_job
+
+
+async def _remote_printer_queue_cleanup() -> dict[str, Any]:
+    """Clear stale jobs held by the physical printer without touching other connector features."""
+    before = await get_printer_capabilities_impl()
+    operations = set(before.get("operations_supported") or [])
+    result: dict[str, Any] = {
+        "attempted": False,
+        "supported": "Cancel-My-Jobs" in operations,
+        "queued_before": before.get("queued_job_count"),
+        "state_before": before.get("state"),
+        "reasons_before": before.get("state_reasons") or [],
+    }
+
+    if "Cancel-My-Jobs" not in operations:
+        result["skipped"] = "Printer does not advertise Cancel-My-Jobs."
+        return result
+
+    result["attempted"] = True
+    await _run_ipptool(_simple_operation_test("Cancel-My-Jobs"), timeout=20)
+    await asyncio.sleep(0.75)
+
+    after = await get_printer_capabilities_impl()
+    result.update(
+        {
+            "queued_after": after.get("queued_job_count"),
+            "state_after": after.get("state"),
+            "reasons_after": after.get("state_reasons") or [],
+            "accepting_jobs_after": after.get("accepting_jobs"),
+        }
+    )
+
+    remaining = int(after.get("queued_job_count") or 0)
+    reasons = set(after.get("state_reasons") or [])
+    if remaining > 0 and after.get("accepting_jobs") is False and "spool-area-full-report" in reasons:
+        raise RuntimeError(
+            "Physical printer still reports a full internal spool after Cancel-My-Jobs; "
+            "new print job was blocked to avoid filling the queue further."
+        )
+
+    return result
+
+
+async def _submit_print_job_with_remote_cleanup(
+    target,
+    copies: int,
+    media: str,
+    color: bool,
+    duplex: bool,
+) -> dict[str, Any]:
+    cleanup: dict[str, Any]
+    try:
+        cleanup = await _remote_printer_queue_cleanup()
+    except RuntimeError:
+        raise
+    except (OSError, ValueError, TypeError) as exc:
+        # Capability probing should never take down the connector or block a
+        # normally reachable printer that does not support this optional path.
+        cleanup = {"attempted": False, "warning": str(exc)}
+
+    result = await _original_submit_print_job(target, copies, media, color, duplex)
+    result["remote_queue_cleanup"] = cleanup
+    return result
+
+
+# server.py owns the print tools. Replacing only this internal submission hook keeps
+# the rest of the stable connector untouched while adding remote IPP queue cleanup.
+server_module._submit_print_job = _submit_print_job_with_remote_cleanup
 
 
 @mcp.tool()
@@ -245,9 +319,18 @@ async def printer_cancel_job(job_id: str) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+@mcp.tool()
+async def printer_remote_queue_cleanup() -> dict[str, Any]:
+    """Cancel stale jobs held by the physical printer through IPP Cancel-My-Jobs."""
+    try:
+        return {"ok": True, **(await _remote_printer_queue_cleanup())}
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 async def startup_check() -> bool:
     print(
-        "ChatGPT Connector 0.8.0 (Admin API v2 + Assist + Brain + IPP printer controls) starting...",
+        "ChatGPT Connector 0.9.0-beta (MCP Events + remote printer spool cleanup) starting...",
         flush=True,
     )
     try:
@@ -269,11 +352,13 @@ async def startup_check() -> bool:
             "list_addons, get_addon_info, get_hardware_info, get_host_info, "
             "list_backups, create_full_backup, get_admin_job, get_admin_logs; "
             "Printer tools: printer_capabilities, printer_identify, printer_wake, "
-            "printer_queue_status, printer_queue_control, printer_cancel_job; "
+            "printer_queue_status, printer_queue_control, printer_cancel_job, "
+            "printer_remote_queue_cleanup; "
             "Assist tools: list_assist_pipelines, update_assist_pipeline, "
             "list_assist_exposed_entities, set_assist_entity_exposure, "
             "set_assist_exposed_entities; "
-            "Brain tools: brain_status, brain_recent_events, brain_suggestions",
+            "Brain tools: brain_status, brain_recent_events, brain_suggestions; "
+            "MCP Events tools: mcp_events_status, emit_test_chatgpt_event",
             flush=True,
         )
         return True
