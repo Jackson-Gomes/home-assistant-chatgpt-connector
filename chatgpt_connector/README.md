@@ -10,6 +10,41 @@ Version 0.4.0 enables the Supervisor API with `hassio_role: manager`. This is in
 
 Operations that can change the installation should be exposed as explicit MCP tools with validation and confirmation. In Admin API v2, creating a full backup requires `confirm=true`.
 
+## MCP Events beta (0.9.0-beta)
+
+Version 0.9.0-beta adds the reverse path from Home Assistant to ChatGPT using MCP Events on protocol `2026-07-28`.
+
+Flow:
+
+`Home Assistant -> chatgpt_command event -> connector -> ha.command MCP event -> subscribed ChatGPT chat`
+
+The add-on listens internally to the Home Assistant custom event `chatgpt_command`. No ESP32, Tuya service, inbound Home Assistant port, or OpenAI API key is required for this path. The existing Secure MCP Tunnel remains the external transport.
+
+Example Home Assistant action:
+
+```yaml
+- event: chatgpt_command
+  event_data:
+    text: "Verifique por que o robo nao passou pano depois de aspirar"
+    source: "automation"
+```
+
+The MCP server advertises the event `ha.command` and implements:
+
+- `events/list`
+- `events/subscribe`
+- `events/unsubscribe`
+- signed Standard Webhooks callback verification and delivery
+- persistent subscriptions under `/data/mcp_events_subscriptions.json`
+- callback HTTPS/public-address validation, no redirects, bounded retries, expiration and secret rotation
+
+Diagnostic tools:
+
+- `mcp_events_status()` — subscription count, Home Assistant listener state and last delivery status without exposing secrets
+- `emit_test_chatgpt_event(text, source)` — emits a manual test `ha.command` event
+
+After installing the beta, rescan the plugin in ChatGPT so `ha.command` appears in the plugin event catalog. In the ChatGPT conversation that should receive Home Assistant commands, ask ChatGPT to subscribe to `ha.command` and describe what it should do when events arrive.
+
 ## Core tools
 
 - `read_config_file` — reads UTF-8 text files under `/config/`
