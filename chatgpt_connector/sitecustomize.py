@@ -7,6 +7,7 @@ Events extension required by ChatGPT.
 """
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 import types
@@ -62,8 +63,92 @@ def _capture_result(result: Any) -> dict[str, Any]:
     }
 
 
+def _empty_capture() -> dict[str, Any]:
+    return {
+        "captured_at": None,
+        "transport": None,
+        "python_type": None,
+        "payload": None,
+        "json": None,
+    }
+
+
+def _capture_wire_message(runtime: Any, msg: Any, transport: str) -> None:
+    """Capture the exact JSON-RPC body produced by the SDK transport serializer."""
+    try:
+        body = msg.model_dump(mode="json", by_alias=True, exclude_none=True)
+        # Match mcp.server._streamable_http_modern._write for JSON-RPC errors
+        # whose request id could not be parsed. Success responses are unchanged.
+        if getattr(msg, "id", object()) is None and hasattr(msg, "error"):
+            body["id"] = None
+        serialized = json.dumps(body, separators=(",", ":"))
+    except Exception as exc:
+        failed = {
+            "captured_at": _utc_iso(),
+            "transport": transport,
+            "python_type": type(msg).__name__,
+            "payload": {"repr": repr(msg)[:8000]},
+            "json": f"<wire serialization capture failed: {type(exc).__name__}: {exc}>",
+        }
+        runtime._wire_last = failed
+        return
+
+    capture = {
+        "captured_at": _utc_iso(),
+        "transport": transport,
+        "python_type": type(msg).__name__,
+        "payload": body,
+        "json": serialized,
+    }
+    runtime._wire_last = capture
+
+    result = body.get("result") if isinstance(body, dict) else None
+    if not isinstance(result, dict):
+        return
+
+    # Keep dedicated snapshots so later diagnostic tool calls cannot overwrite
+    # the evidence from discovery/list responses.
+    if "capabilities" in result and "supportedVersions" in result:
+        runtime._wire_discovery = capture
+    elif "events" in result:
+        runtime._wire_events_list = capture
+
+
+def _install_wire_capture(runtime: Any) -> None:
+    """Instrument the SDK's final modern HTTP/SSE serialization boundary."""
+    try:
+        modern = importlib.import_module("mcp.server._streamable_http_modern")
+    except Exception as exc:
+        runtime._wire_patch_error = f"import failed: {type(exc).__name__}: {exc}"
+        return
+
+    modern._ha_events_wire_runtime = runtime
+
+    if not getattr(modern, "_ha_events_wire_capture_installed", False):
+        original_write = modern._write
+        original_sse_event = modern._sse_event
+
+        async def _write_with_capture(msg, scope, receive, send):
+            target = getattr(modern, "_ha_events_wire_runtime", None)
+            if target is not None:
+                _capture_wire_message(target, msg, "json")
+            return await original_write(msg, scope, receive, send)
+
+        def _sse_event_with_capture(msg):
+            target = getattr(modern, "_ha_events_wire_runtime", None)
+            if target is not None:
+                _capture_wire_message(target, msg, "sse")
+            return original_sse_event(msg)
+
+        modern._write = _write_with_capture
+        modern._sse_event = _sse_event_with_capture
+        modern._ha_events_wire_capture_installed = True
+
+    runtime._wire_patch_error = None
+
+
 class _InstrumentedMCPEventsRuntime(MCPEventsRuntime):
-    """MCP Events runtime with wire-level diagnostics for ChatGPT discovery/subscription."""
+    """MCP Events runtime with logical and wire-level discovery diagnostics."""
 
     _TRACKED_METHODS = (
         "server/discover",
@@ -98,6 +183,12 @@ class _InstrumentedMCPEventsRuntime(MCPEventsRuntime):
             "payload": None,
             "json": None,
         }
+        self._wire_discovery: dict[str, Any] = _empty_capture()
+        self._wire_events_list: dict[str, Any] = _empty_capture()
+        self._wire_last: dict[str, Any] = _empty_capture()
+        self._wire_patch_error: str | None = None
+
+        _install_wire_capture(self)
 
         # Keep the existing public diagnostic tool, but enrich it without adding
         # another MCP tool or exposing callback URLs/secrets.
@@ -108,6 +199,12 @@ class _InstrumentedMCPEventsRuntime(MCPEventsRuntime):
             payload["rpc"] = {method: dict(data) for method, data in self._rpc.items()}
             payload["discovery"] = dict(self._discovery)
             payload["events_list"] = dict(self._events_list)
+            payload["wire"] = {
+                "patch_error": self._wire_patch_error,
+                "discovery": dict(self._wire_discovery),
+                "events_list": dict(self._wire_events_list),
+                "last_response": dict(self._wire_last),
+            }
             return payload
 
         self.store.status = status_with_rpc  # type: ignore[method-assign]
@@ -163,7 +260,7 @@ class FastMCP(MCPServer):
         middleware = list(kwargs.pop("middleware", ()) or ())
         middleware.append(runtime.capability_middleware)
 
-        kwargs.setdefault("version", "0.9.3-beta")
+        kwargs.setdefault("version", "0.9.4-beta")
         if kwargs.get("lifespan") is None:
             kwargs["lifespan"] = runtime.lifespan
         super().__init__(
