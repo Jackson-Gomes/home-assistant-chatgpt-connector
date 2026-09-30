@@ -330,7 +330,7 @@ async def printer_remote_queue_cleanup() -> dict[str, Any]:
 
 async def startup_check() -> bool:
     print(
-        "ChatGPT Connector 0.9.0-beta (MCP Events + remote printer spool cleanup) starting...",
+        "ChatGPT Connector 0.9.1-beta (MCP Events diagnostics + remote printer spool cleanup) starting...",
         flush=True,
     )
     try:
