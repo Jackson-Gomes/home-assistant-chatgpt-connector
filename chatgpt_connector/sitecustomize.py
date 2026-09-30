@@ -12,7 +12,19 @@ import types
 
 from mcp.server.mcpserver import MCPServer
 
-from mcp_events import MCPEventsRuntime
+from mcp_events import (
+    EventsListParams,
+    EventsSubscribeParams,
+    EventsUnsubscribeParams,
+    MCPEventsRuntime,
+)
+
+# MCP 2026-07-28 requests carry protocol-level _meta fields. The beta event
+# parameter models validate the application fields strictly, but must tolerate
+# those SDK-managed request metadata keys.
+for _params_model in (EventsListParams, EventsSubscribeParams, EventsUnsubscribeParams):
+    _params_model.model_config["extra"] = "ignore"
+    _params_model.model_rebuild(force=True)
 
 
 class FastMCP(MCPServer):
