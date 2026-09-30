@@ -1,6 +1,10 @@
 #!/usr/bin/with-contenv bashio
 set -e
 
+# Make /app available during Python site initialization so sitecustomize.py can
+# provide the MCP SDK 2 compatibility shim before server.py imports FastMCP.
+export PYTHONPATH="/app${PYTHONPATH:+:$PYTHONPATH}"
+
 export HA_URL="http://supervisor/core"
 export HA_TOKEN="$SUPERVISOR_TOKEN"
 export SUPERVISOR_URL="http://supervisor"
