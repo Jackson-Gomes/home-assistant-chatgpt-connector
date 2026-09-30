@@ -7,6 +7,7 @@ Events extension required by ChatGPT.
 """
 from __future__ import annotations
 
+import json
 import sys
 import types
 from datetime import datetime, timezone
@@ -32,6 +33,33 @@ for _params_model in (EventsListParams, EventsSubscribeParams, EventsUnsubscribe
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _capture_result(result: Any) -> dict[str, Any]:
+    """Capture the logical MCP result immediately before transport serialization."""
+    if isinstance(result, dict):
+        payload: Any = dict(result)
+    elif hasattr(result, "model_dump"):
+        payload = result.model_dump(by_alias=True, exclude_none=True)
+    else:
+        payload = {"repr": repr(result)[:8000]}
+
+    try:
+        serialized = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=False,
+        )
+    except Exception as exc:
+        serialized = f"<json serialization failed: {type(exc).__name__}: {exc}>"
+
+    return {
+        "captured_at": _utc_iso(),
+        "python_type": type(result).__name__,
+        "payload": payload,
+        "json": serialized,
+    }
 
 
 class _InstrumentedMCPEventsRuntime(MCPEventsRuntime):
@@ -62,6 +90,13 @@ class _InstrumentedMCPEventsRuntime(MCPEventsRuntime):
             "captured_at": None,
             "python_type": None,
             "payload": None,
+            "json": None,
+        }
+        self._events_list: dict[str, Any] = {
+            "captured_at": None,
+            "python_type": None,
+            "payload": None,
+            "json": None,
         }
 
         # Keep the existing public diagnostic tool, but enrich it without adding
@@ -71,11 +106,8 @@ class _InstrumentedMCPEventsRuntime(MCPEventsRuntime):
         def status_with_rpc() -> dict[str, Any]:
             payload = base_status()
             payload["rpc"] = {method: dict(data) for method, data in self._rpc.items()}
-            payload["discovery"] = {
-                "captured_at": self._discovery["captured_at"],
-                "python_type": self._discovery["python_type"],
-                "payload": self._discovery["payload"],
-            }
+            payload["discovery"] = dict(self._discovery)
+            payload["events_list"] = dict(self._events_list)
             return payload
 
         self.store.status = status_with_rpc  # type: ignore[method-assign]
@@ -101,17 +133,9 @@ class _InstrumentedMCPEventsRuntime(MCPEventsRuntime):
             raise
 
         if method == "server/discover":
-            if isinstance(result, dict):
-                discovery_payload: Any = dict(result)
-            elif hasattr(result, "model_dump"):
-                discovery_payload = result.model_dump(by_alias=True, exclude_none=True)
-            else:
-                discovery_payload = {"repr": repr(result)[:8000]}
-            self._discovery = {
-                "captured_at": _utc_iso(),
-                "python_type": type(result).__name__,
-                "payload": discovery_payload,
-            }
+            self._discovery = _capture_result(result)
+        elif method == "events/list":
+            self._events_list = _capture_result(result)
 
         if diagnostic is not None:
             diagnostic["successes"] += 1
@@ -139,7 +163,7 @@ class FastMCP(MCPServer):
         middleware = list(kwargs.pop("middleware", ()) or ())
         middleware.append(runtime.capability_middleware)
 
-        kwargs.setdefault("version", "0.9.2-beta")
+        kwargs.setdefault("version", "0.9.3-beta")
         if kwargs.get("lifespan") is None:
             kwargs["lifespan"] = runtime.lifespan
         super().__init__(
