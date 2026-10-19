@@ -1,4 +1,7 @@
 name: Bruce T-Embed CC1101 MQTT Custom
+concurrency:
+  group: bruce-remote-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 on:
   push:
     branches:
@@ -6,13 +9,17 @@ on:
       - feature/bruce-mqtt-control
     paths:
       - ".github/workflows/bruce-t-embed-build.yml"
-      - "prototypes/bruce-remote/**"
+      - "prototypes/bruce-remote/firmware/**"
+      - "prototypes/bruce-remote/apply_to_upstream.py"
+      - "prototypes/bruce-remote/tests/**"
   pull_request:
     branches:
       - main
     paths:
       - ".github/workflows/bruce-t-embed-build.yml"
-      - "prototypes/bruce-remote/**"
+      - "prototypes/bruce-remote/firmware/**"
+      - "prototypes/bruce-remote/apply_to_upstream.py"
+      - "prototypes/bruce-remote/tests/**"
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,6 +31,9 @@ jobs:
     steps:
       - name: Checkout staging repository
         uses: actions/checkout@v4
+      - name: Validate gateway/overlay Python syntax
+        run: |
+          python -m unittest discover -s prototypes/bruce-remote/tests -v
       - name: Get Bruce firmware
         run: |
           git clone --depth=1 https://github.com/BruceDevices/firmware.git upstream-bruce
