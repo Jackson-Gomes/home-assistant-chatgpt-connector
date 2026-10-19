@@ -1,8 +1,9 @@
-name: Bruce T-Embed CC1101 baseline
+name: Bruce T-Embed CC1101 MQTT Custom
 on:
   push:
     branches:
       - prototype/bruce-remote-bridge
+      - feature/bruce-mqtt-control
     paths:
       - ".github/workflows/bruce-t-embed-build.yml"
       - "prototypes/bruce-remote/**"
@@ -17,7 +18,7 @@ permissions:
   contents: read
 jobs:
   build:
-    name: Build upstream Bruce for T-Embed CC1101
+    name: Build BruceRemote for T-Embed CC1101
     runs-on: ubuntu-latest
     timeout-minutes: 65
     steps:
@@ -27,17 +28,9 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/BruceDevices/firmware.git upstream-bruce
           git -C upstream-bruce rev-parse HEAD | tee bruce-upstream-sha.txt
-      - name: Pin upstream FastLED compatibility version
+      - name: Overlay BruceRemote source onto upstream
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          cfg = Path("upstream-bruce/platformio.ini")
-          before = cfg.read_text()
-          needle = "fastled/FastLED @^3.10.3"
-          assert before.count(needle) == 1, "Upstream FastLED dependency declaration changed"
-          cfg.write_text(before.replace(needle, "fastled/FastLED @3.10.3"))
-          print("Pinned FastLED to 3.10.3 (upstream declares ^3.10.3)")
-          PY
+          python prototypes/bruce-remote/apply_to_upstream.py --upstream upstream-bruce --overlay prototypes/bruce-remote
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -61,7 +54,7 @@ jobs:
       - name: Upload firmware and provenance
         uses: actions/upload-artifact@v4
         with:
-          name: bruce-lilygo-t-embed-cc1101-baseline
+          name: bruce-lilygo-t-embed-cc1101-mqtt-custom
           path: |
             upstream-bruce/Bruce-lilygo-t-embed-cc1101.bin
             bruce-upstream-sha.txt
