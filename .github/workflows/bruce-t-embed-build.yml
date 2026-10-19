@@ -27,6 +27,17 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/BruceDevices/firmware.git upstream-bruce
           git -C upstream-bruce rev-parse HEAD | tee bruce-upstream-sha.txt
+      - name: Pin upstream FastLED compatibility version
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          cfg = Path("upstream-bruce/platformio.ini")
+          before = cfg.read_text()
+          needle = "fastled/FastLED @^3.10.3"
+          assert before.count(needle) == 1, "Upstream FastLED dependency declaration changed"
+          cfg.write_text(before.replace(needle, "fastled/FastLED @3.10.3"))
+          print("Pinned FastLED to 3.10.3 (upstream declares ^3.10.3)")
+          PY
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
