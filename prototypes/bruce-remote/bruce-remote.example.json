@@ -26,6 +26,11 @@
   "ota": {
     "enabled": false,
     "url": "https://your-secure-host.example/firmware.bin",
-    "ca_path": "/bruce-ota-ca.pem"
+    "ca_path": "/bruce-ota-ca.pem",
+    "allow_remote_apply": false
+  },
+  "remote": {
+    "menu": true,
+    "passive_scans": true
   }
 }
