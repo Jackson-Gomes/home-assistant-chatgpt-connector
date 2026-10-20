@@ -91,7 +91,7 @@ async def bruce_say(text: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def bruce_navigate(button: str) -> dict[str, Any]:
-    """Navigate Bruce's menu after physical unlock. Values: next, prev, up, down, select, esc, nextpage, prevpage."""
+    """Navigate Bruce menus when locally enabled. Values: next, prev, up, down, select, esc, nextpage, prevpage."""
     allowed = {"next", "prev", "up", "down", "select", "esc", "nextpage", "prevpage"}
     if button not in allowed:
         return {"ok": False, "error": f"Button must be one of {sorted(allowed)}"}
@@ -99,7 +99,7 @@ async def bruce_navigate(button: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def bruce_menu_option(index: int) -> dict[str, Any]:
-    """Select a Bruce menu option by index after physical unlock."""
+    """Select a Bruce menu option when locally enabled."""
     if not 0 <= index <= 100:
         return {"ok": False, "error": "Menu index must be 0..100"}
     return await command("menu.option", {"index": index})
@@ -122,19 +122,19 @@ async def bruce_rf_send_saved(name: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def bruce_ir_receive() -> dict[str, Any]:
-    """Passively read a short IR signal, only when physically unlocked and supported by firmware v0.2."""
+    """Passively read IR from an enabled device."""
     return await command("ir.receive", timeout=22)
 
 @mcp.tool()
 async def bruce_rf_receive(frequency_hz: int) -> dict[str, Any]:
-    """Passively read a Sub-GHz signal, only when unlocked, at one allowed MHz-band center frequency."""
+    """Passively receive Sub-GHz at one permitted center frequency."""
     if frequency_hz not in (315000000, 433920000, 868350000, 915000000):
         return {"ok": False, "error": "Unsupported RF frequency"}
     return await command("rf.receive", {"frequency": frequency_hz}, timeout=22)
 
 @mcp.tool()
 async def bruce_rf_scan(frequency_hz: int) -> dict[str, Any]:
-    """Perform a short passive Sub-GHz scan from an allowlisted starting frequency; requires unlock."""
+    """Perform a receive-only Sub-GHz scan on an allowlisted frequency."""
     if frequency_hz not in (315000000, 433920000, 868350000, 915000000):
         return {"ok": False, "error": "Unsupported RF frequency"}
     return await command("rf.scan", {"frequency": frequency_hz}, timeout=22)
@@ -145,13 +145,23 @@ async def bruce_screen_snapshot() -> dict[str, Any]:
     return await command("screen.snapshot", timeout=12)
 
 @mcp.tool()
+async def bruce_wifi_scan() -> dict[str, Any]:
+    """Passively scan nearby Wi-Fi AP beacons, returning SSIDs, RSSI and channels."""
+    return await command("wifi.scan", timeout=20)
+
+@mcp.tool()
+async def bruce_ble_scan() -> dict[str, Any]:
+    """Listen to BLE advertisements without pairing or active probing."""
+    return await command("ble.scan", timeout=20)
+
+@mcp.tool()
 async def bruce_ota_status() -> dict[str, Any]:
     """Inspect whether dual-slot OTA is configured and the inactive partition is available."""
     return await command("ota.status")
 
 @mcp.tool()
 async def bruce_ota_apply(sha256: str, confirm: bool = False) -> dict[str, Any]:
-    """Update ONLY from locally-pinned HTTPS URL; requires SHA-256 and physical button hold."""
+    """Apply an app-only update from the locally pinned HTTPS URL, with explicit confirmation and SHA-256."""
     if not confirm:
         return {"ok": False, "error": "Explicit confirm=true required for OTA"}
     if not re.fullmatch(r"[0-9a-f]{64}", sha256):
