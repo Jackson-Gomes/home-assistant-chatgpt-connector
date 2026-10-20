@@ -262,16 +262,35 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
             queued(id,"subghz tx "+key+" "+String(f)+" "+
                   String(te)+" "+String(count));
         }
-    } else if (op=="rf.receive" || op=="rf.scan") {
+    } else if (op=="ir.receive" || op=="rf.receive" || op=="rf.scan") {
         if (!armed()) { response(id,false,"physical_unlock_required"); return; }
-        uint32_t f=a["frequency"]|0UL;
-        if (f!=315000000UL && f!=433920000UL &&
-            f!=868350000UL && f!=915000000UL) {
-            response(id,false,"invalid_frequency"); return;
+        if (op=="ir.receive") {
+            IrRead ir(true,false);
+            String result=ir.loop_headless(6);
+            bool truncated=result.length()>900;
+            if (truncated) result.remove(900);
+            JsonDocument r;
+            r["data"]=result;
+            r["truncated"]=truncated;
+            r["received"]=result.length()>0;
+            response(id,true,"ir_capture_complete",&r);
+        } else {
+            uint32_t f=a["frequency"]|0UL;
+            if (f!=315000000UL && f!=433920000UL &&
+                f!=868350000UL && f!=915000000UL) {
+                response(id,false,"invalid_frequency"); return;
+            }
+            String result;
+            if (op=="rf.receive") result=rfReceiveSignal(float(f)/1000000.0f,6,false,true);
+            else result=rf_scan(float(f)/1000000.0f,float(f+1000000UL)/1000000.0f,6);
+            bool truncated=result.length()>900;
+            if (truncated) result.remove(900);
+            JsonDocument r;
+            r["data"]=result;
+            r["truncated"]=truncated;
+            r["received"]=result.length()>0;
+            response(id,true,"rf_capture_complete",&r);
         }
-        // Native radio command output is printed to USB, NOT the MQTT response.
-        if (op=="rf.receive") queued(id,"subghz rx "+String(f));
-        else queued(id,"subghz scan "+String(f)+" "+String(f+1000000UL));
     } else {
         response(id,false,"unknown_or_disabled_operation");
     }
@@ -320,6 +339,18 @@ void task(void *) {
             }
         } else {
             mqtt.loop();
+            bruceScreenPump(mqtt,rootTopic);
+            JsonDocument otaNotice;
+            if (bruceOtaPoll(otaNotice)) {
+                String report;
+                serializeJson(otaNotice,report);
+                mqtt.publish((rootTopic+"/ota").c_str(),report.c_str());
+            }
+            if (bruceOtaRestartReady()) {
+                mqtt.disconnect();
+                vTaskDelay(pdMS_TO_TICKS(150));
+                ESP.restart();
+            }
             if (millis()-lastHeartbeat>45000UL) {
                 lastHeartbeat=millis();
                 online();
