@@ -1,0 +1,31 @@
+{
+  "enabled": false,
+  "device_id": "t-embed-lab-1",
+  "broker": "mqtt.example.net",
+  "port": 8883,
+  "username": "bruce-device",
+  "password": "REPLACE_THIS_LOCALLY_NOT_IN_GITHUB",
+  "ca_path": "/bruce-ca.pem",
+  "actions": {
+    "ir": {
+      "tv_power": {
+        "protocol": "NEC",
+        "address": "04000000",
+        "command": "08000000"
+      }
+    },
+    "rf": {
+      "lab_switch_on": {
+        "key": "445533",
+        "frequency": 433920000,
+        "te": 350,
+        "count": 1
+      }
+    }
+  },
+  "ota": {
+    "enabled": false,
+    "url": "https://your-secure-host.example/firmware.bin",
+    "ca_path": "/bruce-ota-ca.pem"
+  }
+}
