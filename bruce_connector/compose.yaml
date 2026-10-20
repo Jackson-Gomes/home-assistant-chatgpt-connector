@@ -3,7 +3,5 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
-    volumes:
-      - ./certs/broker-ca.pem:/run/secrets/broker-ca.pem:ro
     # No port mapping: this service uses an outbound secure tunnel.
     # MQTT also uses outbound TLS/8883.
