@@ -39,7 +39,7 @@ class SafetyContractTests(unittest.TestCase):
         self.assertIn('op=="ble.scan"',remote)
         self.assertIn("passive_scans_disabled_locally",remote)
         self.assertIn("remote_menu_disabled_locally",remote)
-        self.assertIn('if (!cfg.otaReady)',remote)
+        self.assertIn('if (!cfg.otaReady || !cfg.unattendedOta)',remote)
         self.assertIn("hold_encoder_center_to_unlock",remote)
         self.assertIn('op=="screen.snapshot"',remote)
         self.assertIn('op=="ota.apply"',remote)
