@@ -20,8 +20,9 @@ struct Settings {
     String id, host, username, password, caPath;
     bool otaReady = false;
     // Existing enabled, locally provisioned bridge authorizes read-only diagnostics.
-    bool remoteMenu = true;
-    bool passiveScans = true;
+    bool remoteMenu = false;
+    bool passiveScans = false;
+    bool unattendedOta = false;
     uint16_t port = 8883;
     JsonDocument actions;
 } cfg;
@@ -78,9 +79,10 @@ bool readConfig() {
     ca.close();
     if (caPem.indexOf("-----BEGIN CERTIFICATE-----")<0) return false;
     cfg.actions.set(doc["actions"]);
-    cfg.remoteMenu=doc["remote"]["menu"] | true;
-    cfg.passiveScans=doc["remote"]["passive_scans"] | true;
+    cfg.remoteMenu=doc["remote"]["menu"] | false;
+    cfg.passiveScans=doc["remote"]["passive_scans"] | false;
     JsonVariantConst update = doc["ota"];
+    cfg.unattendedOta=update["allow_remote_apply"] | false;
     if (update["enabled"] | false) {
         const String certFile = update["ca_path"] | "/bruce-ota-ca.pem";
         if (certFile.startsWith("/") && certFile.indexOf("..")<0) {
@@ -190,7 +192,9 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
         // Local HTTPS URL+CA are provisioned on-device; the connector requires
         // explicit confirmation and the complete expected SHA-256.
         // No encoder hold, so future maintenance can be performed remotely.
-        if (!cfg.otaReady) { response(id,false,"ota_not_configured_locally"); return; }
+        if (!cfg.otaReady || !cfg.unattendedOta) {
+            response(id,false,"remote_ota_not_authorized_locally"); return;
+        }
         String reason;
         if (!bruceOtaBegin(id,a["sha256"].as<String>(),reason)) {
             response(id,false,reason.c_str()); return;
