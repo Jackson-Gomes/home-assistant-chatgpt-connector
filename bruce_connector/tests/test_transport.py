@@ -28,8 +28,9 @@ class FakeMqttClient:
         pass
 
     def tls_set(self, *args, **kwargs):
-        if kwargs.get("ca_certs") != "/tmp/test-ca.pem":
-            raise AssertionError("Missing CA")
+        # System trust is secure by default; explicit CA works for private CAs.
+        if "ca_certs" in kwargs and kwargs["ca_certs"] != "/tmp/test-ca.pem":
+            raise AssertionError("Unexpected certificate authority")
 
     def connect_async(self, *args, **kwargs):
         self.started = True
@@ -59,7 +60,6 @@ ENV = {
     "BRUCE_MQTT_PASSWORD": "not-secret",
     "BRUCE_MQTT_HOST": "mqtt-test.example.com",
     "BRUCE_MQTT_PORT": "8883",
-    "BRUCE_MQTT_CA_PEM": "/tmp/test-ca.pem",
 }
 
 
@@ -82,6 +82,13 @@ class TransportTests(unittest.TestCase):
             types.SimpleNamespace(topic=self.transport.root + "/" + suffix,
                                   payload=json.dumps(data).encode()),
         )
+
+    def test_private_ca_can_be_configured(self):
+        self.transport.close()
+        with patch.dict(os.environ, {"BRUCE_MQTT_CA_PEM": "/tmp/test-ca.pem"}):
+            second = BruceTransport()
+            self.assertTrue(second.client.is_connected())
+            second.close()
 
     def test_allowed_operations_not_unrestricted(self):
         self.assertIn("info.get", ALLOWED_OPS)
