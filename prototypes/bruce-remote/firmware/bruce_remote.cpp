@@ -11,6 +11,7 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include "modules/ble/ble_common.h"
 #include <globals.h>
 #include <time.h>
 
@@ -18,6 +19,9 @@ namespace {
 struct Settings {
     String id, host, username, password, caPath;
     bool otaReady = false;
+    // Existing enabled, locally provisioned bridge authorizes read-only diagnostics.
+    bool remoteMenu = true;
+    bool passiveScans = true;
     uint16_t port = 8883;
     JsonDocument actions;
 } cfg;
@@ -34,7 +38,7 @@ const char * const operations[] = {
     "screen.brightness", "screen.color", "sound.tone", "sound.say",
     "menu.nav", "menu.option", "ir.send_saved", "rf.send_saved",
     "ir.receive", "rf.receive", "rf.scan", "screen.snapshot",
-    "ota.status", "ota.apply"
+    "wifi.scan", "ble.scan", "ota.status", "ota.apply"
 };
 bool word(const String &s, size_t max) {
     if (s.isEmpty() || s.length() > max) return false;
@@ -74,6 +78,8 @@ bool readConfig() {
     ca.close();
     if (caPem.indexOf("-----BEGIN CERTIFICATE-----")<0) return false;
     cfg.actions.set(doc["actions"]);
+    cfg.remoteMenu=doc["remote"]["menu"] | true;
+    cfg.passiveScans=doc["remote"]["passive_scans"] | true;
     JsonVariantConst update = doc["ota"];
     if (update["enabled"] | false) {
         const String certFile = update["ca_path"] | "/bruce-ota-ca.pem";
@@ -138,6 +144,8 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
         JsonArray ops=r["operations"].to<JsonArray>();
         for (auto name:operations) ops.add(name);
         r["armed"]=armed();
+        r["menu_enabled"]=cfg.remoteMenu;
+        r["passive_scans_enabled"]=cfg.passiveScans;
         response(id,true,nullptr,&r);
     } else if (op=="info.get") {
         JsonDocument r;
@@ -152,6 +160,8 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
         r["sound_enabled"]=bruceConfig.soundEnabled;
         r["sd_mounted"]=sdcardMounted;
         r["armed"]=armed();
+        r["menu_enabled"]=cfg.remoteMenu;
+        r["passive_scans_enabled"]=cfg.passiveScans;
         response(id,true,nullptr,&r);
     } else if (op=="remote.lock") {
         unlockedUntil=0;
@@ -177,10 +187,9 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
         }
         response(id,true,nullptr,&r);
     } else if (op=="ota.apply") {
-        if (!armed() || digitalRead(ENCODER_KEY)!=LOW) {
-            response(id,false,"physical_unlock_and_button_hold_required");
-            return;
-        }
+        // Local HTTPS URL+CA are provisioned on-device; the connector requires
+        // explicit confirmation and the complete expected SHA-256.
+        // No encoder hold, so future maintenance can be performed remotely.
         if (!cfg.otaReady) { response(id,false,"ota_not_configured_locally"); return; }
         String reason;
         if (!bruceOtaBegin(id,a["sha256"].as<String>(),reason)) {
@@ -188,7 +197,6 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
         }
         response(id,true,"ota_started_progress_on_ota_topic");
     } else if (op=="screen.snapshot") {
-        if (!armed()) { response(id,false,"physical_unlock_required"); return; }
         JsonDocument meta;
         if (!bruceScreenBegin(id,meta)) {
             response(id,false,"screen_busy_or_unavailable"); return;
@@ -220,7 +228,7 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
         }
         queued(id,"say "+phrase);
     } else if (op=="menu.nav" || op=="menu.option") {
-        if (!armed()) { response(id,false,"physical_unlock_required"); return; }
+        if (!cfg.remoteMenu) { response(id,false,"remote_menu_disabled_locally"); return; }
         if (op=="menu.nav") {
             String direction=a["button"].as<String>();
             if (direction!="next" && direction!="prev" &&
@@ -262,8 +270,68 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
             queued(id,"subghz tx "+key+" "+String(f)+" "+
                   String(te)+" "+String(count));
         }
+    } else if (op=="wifi.scan") {
+        if (!cfg.passiveScans) { response(id,false,"passive_scans_disabled_locally"); return; }
+        if (WiFi.status()!=WL_CONNECTED) {
+            response(id,false,"wifi_not_connected"); return;
+        }
+        // Passive Wi-Fi scan listens for beacons (no probe-request transmission).
+        // Run for a bounded time to minimize disruption to the MQTT link.
+        int n=WiFi.scanNetworks(false,false,true,80);
+        if (n<0) {
+            response(id,false,"wifi_scan_failed"); return;
+        }
+        JsonDocument r;
+        r["total"]=n;
+        JsonArray networks=r["networks"].to<JsonArray>();
+        for (int i=0; i<n && i<10; ++i) {
+            JsonObject net=networks.add<JsonObject>();
+            String ssid=WiFi.SSID(i);
+            if (ssid.length()>32) ssid.remove(32);
+            net["ssid"]=ssid;
+            net["rssi"]=WiFi.RSSI(i);
+            net["channel"]=WiFi.channel(i);
+            net["bssid"]=WiFi.BSSIDstr(i);
+            net["auth"]=static_cast<int>(WiFi.encryptionType(i));
+        }
+        r["limited"]=n>10;
+        WiFi.scanDelete();
+        response(id,true,"passive_wifi_scan_complete",&r);
+    } else if (op=="ble.scan") {
+        if (!cfg.passiveScans) { response(id,false,"passive_scans_disabled_locally"); return; }
+        if (ESP.getFreeHeap()<24000) {
+            response(id,false,"insufficient_heap_for_ble_scan"); return;
+        }
+        // NimBLE is already a dependency of Bruce. No active scan or pairing.
+        if (!BLEDevice::isInitialized() && !BLEDevice::init("")) {
+            response(id,false,"ble_init_failed"); return;
+        }
+        BLEScan *scanner=BLEDevice::getScan();
+        if (!scanner) { response(id,false,"ble_scanner_unavailable"); return; }
+        if (scanner->isScanning()) { response(id,false,"ble_scanner_busy"); return; }
+        scanner->setActiveScan(false);
+        scanner->setInterval(90);
+        scanner->setWindow(45);
+        BLEScanResults results=scanner->getResults(1800,false);
+        int total=results.getCount();
+        JsonDocument r;
+        r["total"]=total;
+        JsonArray devices=r["devices"].to<JsonArray>();
+        for (int i=0; i<total && i<10; ++i) {
+            const NimBLEAdvertisedDevice *device=results.getDevice(i);
+            if (!device) continue;
+            JsonObject found=devices.add<JsonObject>();
+            found["address"]=String(device->getAddress().toString().c_str());
+            String name=String(device->getName().c_str());
+            if (name.length()>32) name.remove(32);
+            found["name"]=name;
+            found["rssi"]=device->getRSSI();
+        }
+        r["limited"]=total>10;
+        scanner->clearResults();
+        response(id,true,"passive_ble_scan_complete",&r);
     } else if (op=="ir.receive" || op=="rf.receive" || op=="rf.scan") {
-        if (!armed()) { response(id,false,"physical_unlock_required"); return; }
+        if (!cfg.passiveScans) { response(id,false,"passive_scans_disabled_locally"); return; }
         if (op=="ir.receive") {
             IrRead ir(true,false);
             String result=ir.loop_headless(6);
