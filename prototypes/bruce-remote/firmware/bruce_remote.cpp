@@ -303,7 +303,7 @@ void task(void *) {
     }
     bruceScreenEnable(); 
     tls.setCACert(caPem.c_str()); // Verify MQTT broker certificate and hostname.
-    tls.setTimeout(6);
+    tls.setTimeout(6000);
     mqtt.setServer(cfg.host.c_str(),cfg.port);
     mqtt.setBufferSize(2048);
     mqtt.setSocketTimeout(6);
