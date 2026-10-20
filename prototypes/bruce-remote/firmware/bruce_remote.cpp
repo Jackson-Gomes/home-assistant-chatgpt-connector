@@ -4,6 +4,7 @@
 #include "modules/ir/ir_read.h"
 #include "modules/rf/rf_scan.h"
 #include <esp_ota_ops.h>
+#include <esp_heap_caps.h>
 #include "core/serialcmds.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -155,6 +156,8 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
         r["board"]="lilygo-t-embed-cc1101";
         r["uptime_ms"]=millis();
         r["free_heap"]=ESP.getFreeHeap();
+        r["free_internal_heap"]=heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        r["largest_internal_block"]=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         r["free_psram"]=ESP.getFreePsram();
         r["wifi_connected"]=WiFi.isConnected();
         r["wifi_rssi"]=WiFi.isConnected()?WiFi.RSSI():0;
@@ -179,6 +182,9 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
         JsonDocument r;
         r["configured"]=cfg.otaReady;
         r["busy"]=bruceOtaBusy();
+        r["worker_stack_bytes"]=BRUCE_OTA_TASK_STACK_BYTES;
+        r["free_internal_heap"]=heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        r["largest_internal_block"]=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         const esp_partition_t *running=esp_ota_get_running_partition();
         const esp_partition_t *next=esp_ota_get_next_update_partition(nullptr);
         r["dual_partition"]=next!=nullptr;
