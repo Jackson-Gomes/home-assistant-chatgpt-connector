@@ -7,9 +7,9 @@ set -eu
 : "${BRUCE_MQTT_HOST:?Set MQTT broker hostname}"
 : "${BRUCE_MQTT_USER:?Set MQTT username}"
 : "${BRUCE_MQTT_PASSWORD:?Set MQTT password}"
-: "${BRUCE_MQTT_CA_PEM:?Set CA PEM file path}"
-
-if [ ! -s "$BRUCE_MQTT_CA_PEM" ]; then
+# A custom CA PEM is optional: system root CA store is used by default.
+# If a custom PEM is explicitly configured, fail closed when it is absent.
+if [ -n "${BRUCE_MQTT_CA_PEM:-}" ] && [ ! -s "$BRUCE_MQTT_CA_PEM" ]; then
   echo "MQTT TLS CA certificate file missing or empty" >&2
   exit 1
 fi
