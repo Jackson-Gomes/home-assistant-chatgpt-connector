@@ -8,6 +8,7 @@ on:
       - prototype/bruce-remote-bridge
       - feature/bruce-mqtt-control
       - feature/bruce-telemetry-ota
+      - feature/bruce-standalone-mcp
     paths:
       - ".github/workflows/bruce-t-embed-build.yml"
       - "prototypes/bruce-remote/firmware/**"
@@ -25,7 +26,7 @@ on:
       - "prototypes/bruce-remote/tests/**"
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     name: Build BruceRemote dual-OTA for T-Embed CC1101
@@ -100,3 +101,32 @@ jobs:
             firmware-sha256.txt
             ota-app-sha256.txt
           retention-days: 14
+
+      - name: Publish app-only OTA image to a stable raw HTTPS path
+        if: github.event_name == 'push' && github.ref_name == 'feature/bruce-standalone-mcp'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The raw.githubusercontent.com path is pinned in the device locally.
+          # Never publish a merged factory image as the OTA payload.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin bruce-ota-images:refs/remotes/origin/bruce-ota-images || true
+          if git show-ref --verify --quiet refs/remotes/origin/bruce-ota-images; then
+            git worktree add --detach /tmp/bruce-ota-images origin/bruce-ota-images
+            (cd /tmp/bruce-ota-images && git checkout -B bruce-ota-images)
+          else
+            git worktree add --detach /tmp/bruce-ota-images HEAD
+            (cd /tmp/bruce-ota-images && git checkout --orphan bruce-ota-images && git rm -rf .)
+          fi
+          cp upstream-bruce/.pio/build/lilygo-t-embed-cc1101/firmware.bin /tmp/bruce-ota-images/firmware.bin
+          cp ota-app-sha256.txt /tmp/bruce-ota-images/ota-app-sha256.txt
+          cp bruce-upstream-sha.txt /tmp/bruce-ota-images/bruce-upstream-sha.txt
+          (
+            cd /tmp/bruce-ota-images
+            git add firmware.bin ota-app-sha256.txt bruce-upstream-sha.txt
+            if ! git diff --cached --quiet; then
+              git commit -m "Publish verified T-Embed OTA app from ${GITHUB_SHA}"
+              git push origin HEAD:bruce-ota-images
+            fi
+          )
