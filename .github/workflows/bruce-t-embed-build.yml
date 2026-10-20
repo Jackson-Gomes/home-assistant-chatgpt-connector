@@ -1,4 +1,4 @@
-name: Bruce T-Embed CC1101 MQTT Custom
+name: Bruce T-Embed CC1101 Remote OTA
 concurrency:
   group: bruce-remote-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
@@ -7,10 +7,12 @@ on:
     branches:
       - prototype/bruce-remote-bridge
       - feature/bruce-mqtt-control
+      - feature/bruce-telemetry-ota
     paths:
       - ".github/workflows/bruce-t-embed-build.yml"
       - "prototypes/bruce-remote/firmware/**"
       - "prototypes/bruce-remote/apply_to_upstream.py"
+      - "prototypes/bruce-remote/bruce_remote_ota_16Mb.csv"
       - "prototypes/bruce-remote/tests/**"
   pull_request:
     branches:
@@ -19,13 +21,14 @@ on:
       - ".github/workflows/bruce-t-embed-build.yml"
       - "prototypes/bruce-remote/firmware/**"
       - "prototypes/bruce-remote/apply_to_upstream.py"
+      - "prototypes/bruce-remote/bruce_remote_ota_16Mb.csv"
       - "prototypes/bruce-remote/tests/**"
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   build:
-    name: Build BruceRemote for T-Embed CC1101
+    name: Build BruceRemote dual-OTA for T-Embed CC1101
     runs-on: ubuntu-latest
     timeout-minutes: 65
     steps:
@@ -61,12 +64,30 @@ jobs:
         run: |
           test -s upstream-bruce/Bruce-lilygo-t-embed-cc1101.bin
           sha256sum upstream-bruce/Bruce-lilygo-t-embed-cc1101.bin | tee firmware-sha256.txt
+          test -s upstream-bruce/.pio/build/lilygo-t-embed-cc1101/firmware.bin
+          sha256sum upstream-bruce/.pio/build/lilygo-t-embed-cc1101/firmware.bin | tee ota-app-sha256.txt
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          path=Path('upstream-bruce/bruce_remote_ota_16Mb.csv')
+          entries=list(csv.reader(line for line in path.read_text().splitlines() if line.strip() and not line.startswith('#')))
+          specs={r[0].strip(): (int(r[3].strip(),0),int(r[4].strip(),0)) for r in entries}
+          assert specs['ota_0']==(0x10000,0x470000)
+          assert specs['ota_1']==(0x480000,0x470000)
+          app=Path('upstream-bruce/.pio/build/lilygo-t-embed-cc1101/firmware.bin')
+          assert app.stat().st_size <= specs['ota_0'][1]
+          assert specs['coredump'][0]+specs['coredump'][1]==0x1000000
+          print('Verified dual app partitions and OTA app image fit')
+          PY
       - name: Upload firmware and provenance
         uses: actions/upload-artifact@v4
         with:
-          name: bruce-lilygo-t-embed-cc1101-mqtt-custom
+          name: bruce-lilygo-t-embed-cc1101-ota-prototype
           path: |
             upstream-bruce/Bruce-lilygo-t-embed-cc1101.bin
+            upstream-bruce/.pio/build/lilygo-t-embed-cc1101/firmware.bin
+            upstream-bruce/bruce_remote_ota_16Mb.csv
             bruce-upstream-sha.txt
             firmware-sha256.txt
+            ota-app-sha256.txt
           retention-days: 14
