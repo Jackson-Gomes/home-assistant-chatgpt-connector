@@ -162,7 +162,9 @@ bool bruceOtaBegin(const String &id, const String &expectedSha256, String &reaso
     done.store(false);
     success.store(false);
     running.store(true);
-    if (xTaskCreate(updateWorker,"BruceOTA",16384,nullptr,1,nullptr)!=pdPASS) {
+    // Reserve 8 KiB of INTERNAL stack, rather than 16 KiB, to leave room for TLS.
+    // Do not allocate this stack in PSRAM: Update.write() accesses flash.
+    if (xTaskCreate(updateWorker,"BruceOTA",BRUCE_OTA_TASK_STACK_BYTES,nullptr,1,nullptr)!=pdPASS) {
         running.store(false);
         reason="ota_task_allocation_failed"; return false;
     }
