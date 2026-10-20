@@ -282,7 +282,7 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
             }
             String result;
             if (op=="rf.receive") result=rfReceiveSignal(float(f)/1000000.0f,6,false,true);
-            else result=rf_scan(float(f)/1000000.0f,float(f+1000000UL)/1000000.0f,6);
+            else result=rf_scan(float(f)/1000000.0f,float(f+1000000UL)/1000000.0f,600);
             bool truncated=result.length()>900;
             if (truncated) result.remove(900);
             JsonDocument r;
