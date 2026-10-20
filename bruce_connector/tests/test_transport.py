@@ -93,6 +93,8 @@ class TransportTests(unittest.TestCase):
     def test_allowed_operations_not_unrestricted(self):
         self.assertIn("info.get", ALLOWED_OPS)
         self.assertIn("screen.snapshot", ALLOWED_OPS)
+        self.assertIn("wifi.scan", ALLOWED_OPS)
+        self.assertIn("ble.scan", ALLOWED_OPS)
         self.assertNotIn("raw.cli", ALLOWED_OPS)
         self.assertNotIn("badusb.run", ALLOWED_OPS)
         with self.assertRaises(BruceTransportError):
