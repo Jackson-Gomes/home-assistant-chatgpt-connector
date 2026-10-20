@@ -42,8 +42,14 @@ class BruceTransport:
             clean_session=True,
         )
         self.client.username_pw_set(os.environ["BRUCE_MQTT_USER"], os.environ["BRUCE_MQTT_PASSWORD"])
-        # broker CA is required; hostname verification is enabled by default
-        self.client.tls_set(ca_certs=os.environ["BRUCE_MQTT_CA_PEM"])
+        # Use system CA certificates by default (Railway includes ca-certificates).
+        # A private broker root CA can be supplied optionally via a PEM file.
+        # Both modes keep TLS server and hostname verification enabled.
+        ca_file = os.environ.get("BRUCE_MQTT_CA_PEM") or None
+        if ca_file:
+            self.client.tls_set(ca_certs=ca_file)
+        else:
+            self.client.tls_set()
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
         self.client.on_disconnect = self.on_disconnect
