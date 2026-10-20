@@ -39,7 +39,7 @@ void updateWorker(void *) {
     }
     WiFiClientSecure tls;
     tls.setCACert(rootPem.c_str());
-    tls.setTimeout(12);
+    tls.setTimeout(12000);
     HTTPClient http;
     http.setTimeout(12000);
     http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
