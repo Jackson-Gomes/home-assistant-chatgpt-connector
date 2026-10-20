@@ -7,9 +7,11 @@ import secrets
 import threading
 import time
 import zlib
+from pathlib import Path
 
 import paho.mqtt.client as mqtt
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 OPS = frozenset((
@@ -172,3 +174,8 @@ def ota_status(authorization: str | None = Header(default=None)):
     auth(authorization)
     with bridge.lock:
         return dict(bridge.last_ota)
+
+@app.get("/viewer", response_class=HTMLResponse)
+def viewer():
+    # The HTML includes no credentials. All commands require an authenticated POST.
+    return (Path(__file__).resolve().parent / "viewer.html").read_text(encoding="utf-8")
