@@ -1,37 +1,40 @@
 # Bruce MCP Connector for Home Assistant OS
 
-This is a **separate add-on**, not an extension of the existing ChatGPT/Home Assistant connector.
-Its only purpose is to run the stand-alone Bruce connector on the same always-on machine.
+The Bruce add-on is independent of the original ChatGPT/Home Assistant connector.
+It has **no** Home Assistant or Supervisor API access, no mounts, and **no inbound ports**.
 
-- Runs `mcp_server.py` bound to `127.0.0.1:8000` within its own container.
-- Uses an **independent OpenAI Secure MCP Tunnel** with outbound connections.
-- Uses a TLS-verified MQTT broker with an outbound connection.
-- Has no published ports, Home Assistant API token, Supervisor API permissions or `/config` mount.
-- Does not modify, restart or depend upon the existing ChatGPT Connector add-on.
+## First: local LAN MQTT connectivity test (v0.1.1)
 
-## Install
+The new setting `mqtt_probe_only: true` (default) runs **only** an outbound authenticated MQTT TLS connection to your broker and watches Bruce status. It does not start the MCP tunnel and does not require a tunnel ID or API key. Start with this before registering a separate MCP tunnel.
 
-The existing GitHub repository is already an HA add-on repository.
-Open Settings > Apps (Add-ons) > App Store, refresh/reload that repository, and install **Bruce MCP Connector**.
+Keep the existing Mosquitto broker configuration and Home Assistant connector unchanged. The following are configured **only in this Bruce add-on**:
 
-Before starting, set all fields in the add-on Configuration tab:
+- `device_id`: `t-embed-lab-1` (match the T-Embed configuration)
+- `mqtt_host`: DNS hostname of the Mosquitto TLS server, resolvable by the HAOS container, **matching the TLS certificate's SAN**.
+- `mqtt_port`: TLS listener port (often 8883, not plaintext 1883)
+- `mqtt_user` and `mqtt_password`: dedicated MQTT credentials recognized by Mosquitto (set in the HAOS add-on Configuration tab, not in Git)
+- `mqtt_ca_pem`: optional trusted CA PEM certificate content for a self-signed or privately issued broker certificate; use system-trusted CA if blank
+- `mqtt_probe_only`: `true` for test mode
 
-| Option | Value |
-|---|---|
-| tunnel_id | NEW Bruce-specific Secure MCP Tunnel ID (do not reuse Home Assistant's) |
-| tunnel_api_key | Matching NEW Bruce tunnel API key |
-| device_id | The configured BruceRemote ID, e.g. t-embed-lab-1 |
-| mqtt_host | TLS MQTT broker DNS hostname (reachable from the add-on) |
-| mqtt_port | 8883, unless your TLS broker uses a different port |
-| mqtt_user | Bruce connector's own MQTT user (not device user) |
-| mqtt_password | Dedicated strong MQTT password |
+The T-Embed's BruceRemote firmware requires its own `/bruce-remote.json` with `enabled: true`, matching broker host/port, device ID and the **device's separate MQTT identity**, as well as the broker CA certificate in `/bruce-ca.pem`. Its MQTT endpoint is **TLS-only**. Standard unmodified Bruce firmware cannot connect to this protocol without BruceRemote compiled in.
 
-Do not commit secrets. Do not make MCP port 8000 or any other port public.
+### Expected logs
 
-The current MQTT transport **requires TLS with a trusted certificate and hostname validation**. The Home Assistant Mosquitto add-on only works as the broker here when its TLS listener on 8883 is properly configured, has a certificate valid for the DNS hostname used, and the user/account has appropriate access. Do not simply point this connector at plaintext port 1883 without changing the transport design.
+When the connector is connected to the broker:
+```
+Bruce MQTT probe: broker_connected=true, device_observed=false, device_online=false
+```
+After a configured T-Embed joins the same broker and publishes online status:
+```
+Bruce MQTT probe: broker_connected=true, device_observed=true, device_online=true
+```
 
-If your T-Embed needs to work on other Wi-Fi networks, a LAN-only MQTT broker isn't reachable directly. Use a separately secured externally reachable TLS MQTT broker or appropriate private network routing. Do not open unprotected router ports.
+When missing values are detected the add-on refuses to connect. Certificates are verified; do not disable certificate/hostname verification to hide mismatches.
 
-## Operational status
+This test does not require internet broker services, public router ports or modifications to Mosquitto's configuration.
 
-Until the new tunnel and broker credentials are supplied, the add-on will stop with a configuration-incomplete error; this has no impact on other add-ons. Verify its own logs after configuration. This package has no HA Supervisor management operations and does not install itself.
+## Then: turn on MCP mode
+
+Set `mqtt_probe_only: false` and provide a **new, separate** `tunnel_id` and `tunnel_api_key` for Bruce in ChatGPT. The existing Home Assistant tunnel must not be reused. With this option, the existing `run.sh` starts MCP and the outbound secure tunnel as before.
+
+Do not expose ports 8000 or 1883/8883 publicly. A LAN-only broker will not be reachable to an ESP32 away from the LAN without a secure VPN routing solution.

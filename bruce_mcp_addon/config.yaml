@@ -1,5 +1,5 @@
 name: Bruce MCP Connector
-version: "0.1.0"
+version: "0.1.1"
 slug: bruce_mcp_connector
 description: Independent Bruce MQTT/MCP connector via outbound Secure MCP Tunnel
 url: https://github.com/Jackson-Gomes/home-assistant-chatgpt-connector
@@ -14,6 +14,7 @@ hassio_api: false
 host_network: false
 ports: {}
 options:
+  mqtt_probe_only: true
   tunnel_id: ""
   tunnel_api_key: ""
   device_id: "t-embed-lab-1"
@@ -21,7 +22,9 @@ options:
   mqtt_port: 8883
   mqtt_user: ""
   mqtt_password: ""
+  mqtt_ca_pem: ""
 schema:
+  mqtt_probe_only: bool
   tunnel_id: str
   tunnel_api_key: password
   device_id: str
@@ -29,3 +32,4 @@ schema:
   mqtt_port: int
   mqtt_user: str
   mqtt_password: password
+  mqtt_ca_pem: str
