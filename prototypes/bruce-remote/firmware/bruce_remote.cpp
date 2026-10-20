@@ -302,7 +302,7 @@ void task(void *) {
         return;
     }
     bruceScreenEnable(); 
-    tls.setCACert(caPem.c_str()); // ALWAYS verify the broker. Do not use setInsecure().
+    tls.setCACert(caPem.c_str()); // Verify MQTT broker certificate and hostname.
     tls.setTimeout(6);
     mqtt.setServer(cfg.host.c_str(),cfg.port);
     mqtt.setBufferSize(2048);
