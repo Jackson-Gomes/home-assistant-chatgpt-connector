@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BruceRemote Viewer</title>
+<style>body{background:#101923;color:#f2f4f6;font:15px system-ui;margin:0}
+main{max-width:760px;margin:auto;padding:20px}h1{font-size:1.45em}
+section{background:#202f40;border:1px solid #34495e;padding:14px;margin:12px 0;border-radius:12px}
+input{background:#132131;color:white;padding:9px;border:1px solid #69809a;border-radius:6px;min-width:260px;max-width:90%}
+button{background:#2f516c;color:white;padding:9px;margin:4px;border:1px solid #6d8297;border-radius:7px;cursor:pointer}
+button:hover{background:#436780}
+canvas{display:block;width:100%;max-width:640px;margin:auto;background:#000;image-rendering:pixelated}
+#status{color:#c8d1dd;white-space:pre-wrap;font-size:13px}small{color:#c8d1dd}
+nav{text-align:center}</style></head><body><main>
+<h1>BruceRemote — Tela e controle</h1>
+<p>Espelho da interface via comandos de desenho do Bruce. Imagens locais não são transferidas.</p>
+<section><label>Token local: <input type="password" id="token" autocomplete="off"></label>
+<nav><button id="unlock">Autorizar (segure botão do T-Embed)</button><button id="lock">Bloquear</button><button id="refresh">Atualizar tela</button></nav>
+<p id="status">Aguardando.</p></section>
+<section><canvas id="screen" width="320" height="170"></canvas><nav>
+<button data-nav="prev">Anterior</button><button data-nav="up">Acima</button><button data-nav="select">OK</button>
+<button data-nav="down">Abaixo</button><button data-nav="next">Próximo</button><button data-nav="esc">Voltar</button>
+</nav><small>A navegação só funciona após autorização física por cinco minutos.</small></section>
+<script>
+const cv=document.getElementById("screen"),ctx=cv.getContext("2d"),status=document.getElementById("status");
+const map={
+ 0:["fg"],1:["x","y","w","h","fg"],2:["x","y","w","h","fg"],
+ 3:["x","y","w","h","r","fg"],4:["x","y","w","h","r","fg"],
+ 5:["x","y","r","fg"],6:["x","y","r","fg"],7:["x","y","x2","y2","x3","y3","fg"],
+ 8:["x","y","x2","y2","x3","y3","fg"],9:["x","y","rx","ry","fg"],10:["x","y","rx","ry","fg"],
+ 11:["x","y","x1","y1","fg"],12:["x","y","r","ir","startAngle","endAngle","fg","bg"],
+ 13:["x","y","bx","by","wd","fg","bg"],14:["x","y","size","fg","bg","txt"],
+ 15:["x","y","size","fg","bg","txt"],16:["x","y","size","fg","bg","txt"],
+ 17:["x","y","size","fg","bg","txt"],18:["x","y","center","ms","fs","file"],
+ 19:["x","y","fg"],20:["x","y","h","fg"],21:["x","y","w","fg"],99:["w","h","rotation"]
+};
+function color(c){return "rgb("+(((c>>11)&31)*255/31)+","+(((c>>5)&63)*255/63)+","+((c&31)*255/31)+")";}
+function draw(bytes){
+ let o=0;
+ while(o+3<=bytes.length){
+  if(bytes[o]!==170)break;
+  const n=bytes[o+1],fn=bytes[o+2],keys=map[fn];
+  if(n<3||o+n>bytes.length)break;
+  if(!keys){o+=n;continue;}
+  let p=o+3,q={};
+  for(const key of keys){
+   if(key==="txt"||key==="file"){q[key]=new TextDecoder().decode(bytes.slice(p,o+n));p=o+n;}
+   else if(key==="fs"||key==="rotation")q[key]=bytes[p++];
+   else{q[key]=(bytes[p]<<8)|bytes[p+1];p+=2;}
+  }
+  o+=n;ctx.lineWidth=1;ctx.strokeStyle=color(q.fg||0);ctx.fillStyle=color(q.fg||0);
+  switch(fn){
+   case 99:cv.width=q.w;cv.height=q.h;break;
+   case 0:ctx.fillRect(0,0,cv.width,cv.height);break;
+   case 1:ctx.strokeRect(q.x,q.y,q.w,q.h);break;
+   case 2:ctx.fillRect(q.x,q.y,q.w,q.h);break;
+   case 3:case 4:ctx.beginPath();ctx.roundRect(q.x,q.y,q.w,q.h,Math.min(q.r,q.w/2,q.h/2));fn===3?ctx.stroke():ctx.fill();break;
+   case 5:case 6:ctx.beginPath();ctx.arc(q.x,q.y,q.r,0,Math.PI*2);fn===5?ctx.stroke():ctx.fill();break;
+   case 7:case 8:ctx.beginPath();ctx.moveTo(q.x,q.y);ctx.lineTo(q.x2,q.y2);ctx.lineTo(q.x3,q.y3);ctx.closePath();fn===7?ctx.stroke():ctx.fill();break;
+   case 9:case 10:ctx.beginPath();ctx.ellipse(q.x,q.y,q.rx,q.ry,0,0,Math.PI*2);fn===9?ctx.stroke():ctx.fill();break;
+   case 11:ctx.beginPath();ctx.moveTo(q.x,q.y);ctx.lineTo(q.x1,q.y1);ctx.stroke();break;
+   case 12:ctx.beginPath();ctx.lineWidth=Math.max(1,q.r-q.ir);ctx.arc(q.x,q.y,(q.r+q.ir)/2,(q.startAngle+90)*Math.PI/180,(q.endAngle+90)*Math.PI/180);ctx.stroke();break;
+   case 13:ctx.beginPath();ctx.lineWidth=Math.max(1,q.wd);ctx.moveTo(q.x,q.y);ctx.lineTo(q.bx,q.by);ctx.stroke();break;
+   case 14:case 15:case 16:case 17:
+    ctx.font=(Math.max(1,q.size)*8)+"px monospace";ctx.textBaseline="top";
+    ctx.textAlign=fn===14?"center":fn===15?"right":"left";
+    const w=ctx.measureText(q.txt||"").width;
+    const bx=fn===14?q.x-w/2:fn===15?q.x-w:q.x;
+    ctx.fillStyle=color(q.bg);ctx.fillRect(bx,q.y,w,Math.max(1,q.size)*8);
+    ctx.fillStyle=color(q.fg);ctx.fillText(q.txt||"",q.x,q.y);break;
+   case 18:ctx.strokeRect(q.x,q.y,30,14);ctx.font="8px monospace";ctx.fillText("IMG",q.x+2,q.y+2);break;
+   case 19:ctx.fillRect(q.x,q.y,1,1);break;
+   case 20:ctx.fillRect(q.x,q.y,1,q.h);break;
+   case 21:ctx.fillRect(q.x,q.y,q.w,1);break;
+  }
+ }
+}
+async function command(op,args={}){
+ const resp=await fetch("/command",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+document.getElementById("token").value},body:JSON.stringify({op,args})});
+ const msg=await resp.json();
+ if(!resp.ok||!msg.ok)throw new Error(msg.reason||msg.detail||"Request rejected");
+ return msg;
+}
+document.getElementById("refresh").onclick=async()=>{
+ status.textContent="Carregando tela...";
+ try{
+  const result=await command("screen.snapshot");
+  const blob=Uint8Array.from(atob(result.screen.base64),v=>v.charCodeAt(0));
+  draw(blob);
+  status.textContent="Atualizado: "+blob.length+" bytes de comandos gráficos.";
+ }catch(e){status.textContent="Erro: "+e.message;}
+};
+document.getElementById("unlock").onclick=async()=>{
+ try{status.textContent=JSON.stringify(await command("remote.unlock"));}
+ catch(e){status.textContent=e.message;}
+};
+document.getElementById("lock").onclick=async()=>{
+ try{status.textContent=JSON.stringify(await command("remote.lock"));}
+ catch(e){status.textContent=e.message;}
+};
+document.querySelectorAll("[data-nav]").forEach(button=>button.onclick=async()=>{
+ try{const r=await command("menu.nav",{button:button.dataset.nav});status.textContent=r.reason||"Enviado";}
+ catch(e){status.textContent=e.message;}
+});
+</script></main></body></html>
