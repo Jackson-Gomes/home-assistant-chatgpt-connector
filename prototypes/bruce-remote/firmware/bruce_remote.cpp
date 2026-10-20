@@ -163,6 +163,37 @@ void onCommand(char *topic, uint8_t *bytes, unsigned int length) {
         }
         unlockedUntil=millis()+ARM_DURATION;
         response(id,true,"unlocked_for_5_minutes");
+    } else if (op=="ota.status") {
+        JsonDocument r;
+        r["configured"]=cfg.otaReady;
+        r["busy"]=bruceOtaBusy();
+        const esp_partition_t *running=esp_ota_get_running_partition();
+        const esp_partition_t *next=esp_ota_get_next_update_partition(nullptr);
+        r["dual_partition"]=next!=nullptr;
+        if (running) r["running_partition"]=running->label;
+        if (next) {
+            r["next_partition"]=next->label;
+            r["max_app_bytes"]=next->size;
+        }
+        response(id,true,nullptr,&r);
+    } else if (op=="ota.apply") {
+        if (!armed() || digitalRead(ENCODER_KEY)!=LOW) {
+            response(id,false,"physical_unlock_and_button_hold_required");
+            return;
+        }
+        if (!cfg.otaReady) { response(id,false,"ota_not_configured_locally"); return; }
+        String reason;
+        if (!bruceOtaBegin(id,a["sha256"].as<String>(),reason)) {
+            response(id,false,reason.c_str()); return;
+        }
+        response(id,true,"ota_started_progress_on_ota_topic");
+    } else if (op=="screen.snapshot") {
+        if (!armed()) { response(id,false,"physical_unlock_required"); return; }
+        JsonDocument meta;
+        if (!bruceScreenBegin(id,meta)) {
+            response(id,false,"screen_busy_or_unavailable"); return;
+        }
+        response(id,true,"screen_chunk_stream_started",&meta);
     } else if (op=="screen.brightness") {
         int percent=a["percent"]|-1;
         if (percent<1 || percent>100) {
