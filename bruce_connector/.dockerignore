@@ -1,0 +1,10 @@
+.env
+*.pem
+certs/
+__pycache__/
+tests/
+*.pyc
+*.log
+*.bak
+.venv/
+.git/
