@@ -1,0 +1,1 @@
+52f94fd183252211e73ae9ad942e6d60db3ecd9bc9036a42592e877235def972  upstream-bruce/.pio/build/lilygo-t-embed-cc1101/firmware.bin
