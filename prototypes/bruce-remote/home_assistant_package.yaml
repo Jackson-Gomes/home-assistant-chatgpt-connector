@@ -1,0 +1,47 @@
+# OPTIONAL Home Assistant package. Requires HA MQTT integration connected to the SAME
+# Internet-accessible TLS broker as the T-Embed (with separate credentials).
+# Change EVERY occurrence of t-embed-lab-1 before enabling.
+# Install only after review. The project has not changed Home Assistant config.
+script:
+  bruce_remote_command:
+    alias: "Bruce Remote Command"
+    mode: queued
+    max: 5
+    fields:
+      op:
+        name: Remote operation
+        description: "One of the BruceRemote operations"
+        required: true
+        selector:
+          text:
+      args:
+        name: JSON arguments
+        description: "Operation-specific arguments"
+        required: false
+        selector:
+          object:
+    sequence:
+      - variables:
+          rid: "req-{{ now().strftime('%Y%m%d%H%M%S%f') }}"
+          expiry: "{{ now().timestamp() | int + 30 }}"
+      - action: mqtt.publish
+        data:
+          topic: "bruce/v1/t-embed-lab-1/cmd"
+          qos: 1
+          retain: false
+          payload: >-
+            {{ {'v': 1, 'id': rid, 'op': op,
+                'args': args | default({}, true),
+                'expires': expiry | int } | to_json }}
+
+mqtt:
+  sensor:
+    - name: "Bruce Remote Status"
+      unique_id: bruce_remote_tembed_status
+      state_topic: "bruce/v1/t-embed-lab-1/status"
+      value_template: "{{ 'online' if value_json.online else 'offline' }}"
+    - name: "Bruce Remote Last Result"
+      unique_id: bruce_remote_tembed_result
+      state_topic: "bruce/v1/t-embed-lab-1/reply"
+      value_template: "{{ value_json.reason | default('ok' if value_json.ok else 'error') }}"
+      json_attributes_topic: "bruce/v1/t-embed-lab-1/reply"
