@@ -37,6 +37,15 @@ jobs:
       - name: Validate gateway/overlay Python syntax
         run: |
           python -m unittest discover -s prototypes/bruce-remote/tests -v
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path('prototypes/bruce-remote/gateway/viewer.html').read_text()
+          matches = re.findall(r'<script>(.*?)</script>', html, flags=re.S)
+          assert len(matches)==1
+          Path('/tmp/bruce_remote_viewer.js').write_text(matches[0])
+          PY
+          node --check /tmp/bruce_remote_viewer.js
       - name: Get Bruce firmware
         run: |
           git clone --depth=1 https://github.com/BruceDevices/firmware.git upstream-bruce
