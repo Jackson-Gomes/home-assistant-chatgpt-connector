@@ -1,32 +1,23 @@
-# Bruce Connector Protocol (draft v0.1)
+# BruceRemote MQTT wire protocol — v0.2
 
-Transport: MQTT over TLS (default TCP 8883), broker reachable from multiple networks. Device must authenticate with its own least-privilege identity. Do not connect to unsecured public brokers.
+Transport: mutually protected broker connection using TLS/CA validation and distinct device and gateway accounts. The broker must be reachable from any user-authorized Wi-Fi network. Configure ACL to `bruce/v1/<device_id>/#` only for this device.
 
-Topic root: `bruce/v1/<device-id>`, where device-id is a user-defined random identifier (not MAC).
+| Topic | Direction | Retain |
+|---|---|---|
+| `bruce/v1/<id>/cmd` | gateway to ESP32 | false |
+| `bruce/v1/<id>/reply` | ESP32 to gateway | false |
+| `bruce/v1/<id>/screen` | ESP32 to gateway (chunk stream) | false |
+| `bruce/v1/<id>/ota` | ESP32 to gateway (progress) | false |
+| `bruce/v1/<id>/status` | ESP32 to gateway (availability/LWT) | true |
 
-- `cmd` (QoS 1, retain=false): commands to device.
-- `reply` (QoS 1, retain=false): result sent to connector.
-- `status` (QoS 1, retained): small, sanitized online/offline state using last-will.
-- `telemetry` (QoS 0, retain=false): sanitized metrics, optionally disabled.
+Command envelope is JSON: `{"v":1,"id":"req-12345678","op":"info.get","args":{},"expires":<unix_utc_seconds>}`. Expires must be in the future, at most 120 seconds ahead, and request IDs must be unique. The device remembers recent IDs to mitigate replay and caps burst rates.
 
-Command:
-```json
-{"v":1,"id":"9b74987b-88eb-4f65-9d7b-b57d8ec3fa15","op":"info.get","args":{},"expires_at":"2026-10-19T19:00:00Z"}
-```
+`info.get` reports Wi-Fi, RAM, PSRAM, brightness and uptime. `remote.capabilities` lists operations. `ota.status` reports active and next partition. `remote.unlock` must be invoked while physically holding the encoder (five-minute window) and `remote.lock` disables it.
 
-Response:
-```json
-{"v":1,"id":"9b74987b-88eb-4f65-9d7b-b57d8ec3fa15","ok":true,"result":{"firmware":"Bruce","online":true}}
-```
+`screen.snapshot` requires the unlock; it immediately replies with the number of chunks and CRC32, then publishes a stream with `{v,id,format:"bruce-tft-drawlog-v1",part,total,bytes,crc32,data:"base64..."}`. Reconstruct by ordering parts and verifying CRC32. This is a drawing-command log, **not** raw screenshot pixels. The local gateway exposes the decoded render via `/viewer` and `screen.base64` from the command response.
 
-Initial allowlist:
-- `info.get`: sanitized firmware/network/uptime/heap report.
-- `settings.get_safe`: read safe user-approved settings.
-- `ir.transmit_saved`: named allowlisted IR codes *for user-owned devices only*; requires confirmation if unknown.
-- `device.restart`: explicit user confirmation.
+`ir.receive` and `rf.receive` / `rf.scan` return bounded decoded result strings via the normal `reply` topic. They require unlock and only support explicitly allowed frequencies. Capture return paths do not enable rebroadcast. `ir.send_saved` and `rf.send_saved` transmit only preconfigured local aliases and require unlock.
 
-Do **not** bridge arbitrary raw Bruce CLI or file/script execution. Do not expose `badusb`, Wi-Fi attacks, unauthorized RF capture/replay, or executable JS to remote tools.
+`ota.apply` expects `{"sha256":"<64-lowercase-hex>"}` in args and requires **both** unlocked state and encoder physically held at initiation. It only downloads from a locally pinned HTTPS URL verified with a locally installed CA PEM. The update is rejected on hash mismatch, error or oversize. It publishes JSON progress and final status on `/ota`.
 
-Constraints: reject unknown ops and oversized payloads, validate JSON schema and UTF-8, reject expired messages and replays (bounded ID cache), cap request rates, send acknowledgments; no confidential details in logs. The ESP32 must remain usable locally when broker unreachable. Wi-Fi provisioning for new SSIDs must require physical user interaction and should not make an unauthenticated AP available indefinitely.
-
-Lifecycle: test standalone official firmware build -> read-only MQTT client -> credential provisioning -> secure remote connector -> allowed IR commands -> optional OTA with signed artifacts and rollback. Initial build is **not** MQTT enabled.
+Queued Bruce CLI commands report `queued_not_executed`, not completion; other operations return actual parsed/captured/validated results. Never expose raw CLI, arbitrary script execution, unauthorized BadUSB or wireless attack functions as remote operations. The gateway must stay local-only; ChatGPT MCP access requires a separate hardened connector.
