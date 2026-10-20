@@ -1,5 +1,7 @@
 # Bruce ChatGPT Connector — standalone prototype
 
+> **BruceRemote v0.3 update:** See [Remote OTA and scans](../prototypes/bruce-remote/REMOTE_OTA_V03.md) for the current GitHub Actions OTA image distribution, locally authorized passive Wi-Fi/BLE scans and remote menu controls. New features require an updated firmware image and local opt-in. The rest of this prototype README contains historical setup notes.
+
 Independent MCP + TLS MQTT connector for the LilyGO T-Embed CC1101 Plus running BruceRemote.
 
 **No Home Assistant runtime, Supervisor API, HA credentials or HA services required.**
@@ -54,11 +56,11 @@ bruce_status, bruce_info, bruce_capabilities, bruce_unlock, bruce_lock,
 bruce_brightness, bruce_screen_color, bruce_tone, bruce_say,
 bruce_navigate, bruce_menu_option, bruce_ir_send_saved, bruce_rf_send_saved,
 bruce_ir_receive, bruce_rf_receive, bruce_rf_scan, bruce_screen_snapshot,
-bruce_ota_status, bruce_ota_apply.
+bruce_ota_status, bruce_ota_apply, bruce_wifi_scan, bruce_ble_scan.
 
 The already-installed Build #23 of BruceRemote has the initial 14 operations. Screen snapshots, IR/RF capture results, and OTA are part of the later v0.2 experimental firmware, which requires separate USB migration to the dual-OTA partition layout. Unsupported operations return a device error rather than being simulated.
 
-Sensitive operations require the local T-Embed encoder to be physically unlocked. OTA also requires explicit confirmation, known expected SHA-256, and holding the encoder button when initiating the update. Results from the Bruce CLI queue are reported as queued, not necessarily executed.
+The v0.3 overlay requires device-local JSON opt-in for remote menus, passive scans and unattended OTA. Saved IR/RF transmissions retain physical unlock. OTA requires explicit confirmation, known expected SHA-256, locally pinned HTTPS URL/CA, and dual OTA partitions, but no encoder hold **after migration to v0.3**. Results from the Bruce CLI queue are reported as queued, not necessarily executed.
 
 ## Deployment status and security
 
