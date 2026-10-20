@@ -1,4 +1,9 @@
 #include "bruce_remote.h"
+#include "bruce_screen.h"
+#include "bruce_ota.h"
+#include "modules/ir/ir_read.h"
+#include "modules/rf/rf_scan.h"
+#include <esp_ota_ops.h>
 #include "core/serialcmds.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -12,6 +17,7 @@
 namespace {
 struct Settings {
     String id, host, username, password, caPath;
+    bool otaReady = false;
     uint16_t port = 8883;
     JsonDocument actions;
 } cfg;
@@ -26,7 +32,9 @@ constexpr uint32_t HEARTBEAT_INTERVAL = 45000UL;
 const char * const operations[] = {
     "info.get", "remote.capabilities", "remote.unlock", "remote.lock",
     "screen.brightness", "screen.color", "sound.tone", "sound.say",
-    "menu.nav", "menu.option", "ir.send_saved", "rf.send_saved", "rf.receive", "rf.scan"
+    "menu.nav", "menu.option", "ir.send_saved", "rf.send_saved",
+    "ir.receive", "rf.receive", "rf.scan", "screen.snapshot",
+    "ota.status", "ota.apply"
 };
 bool word(const String &s, size_t max) {
     if (s.isEmpty() || s.length() > max) return false;
@@ -66,6 +74,18 @@ bool readConfig() {
     ca.close();
     if (caPem.indexOf("-----BEGIN CERTIFICATE-----")<0) return false;
     cfg.actions.set(doc["actions"]);
+    JsonVariantConst update = doc["ota"];
+    if (update["enabled"] | false) {
+        const String certFile = update["ca_path"] | "/bruce-ota-ca.pem";
+        if (certFile.startsWith("/") && certFile.indexOf("..")<0) {
+            File pem = LittleFS.open(certFile,"r");
+            if (pem && pem.size()>=100 && pem.size()<8192) {
+                String trust = pem.readString();
+                cfg.otaReady = bruceOtaConfigure(update["url"].as<String>(),trust);
+            }
+            pem.close();
+        }
+    }
     rootTopic="bruce/v1/"+cfg.id;
     return true;
 }
@@ -231,6 +251,7 @@ void task(void *) {
         vTaskDelete(nullptr);
         return;
     }
+    bruceScreenEnable(); 
     tls.setCACert(caPem.c_str()); // ALWAYS verify the broker. Do not use setInsecure().
     tls.setTimeout(6);
     mqtt.setServer(cfg.host.c_str(),cfg.port);
