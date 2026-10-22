@@ -4,7 +4,7 @@ This is an ESPHome **replacement firmware experiment**, not an update to the exi
 
 ## Status
 - [x] Checked board's microphone/speaker GPIOs against LILYGO documentation.
-- [x] Checked Home Assistant voice pipelines: **Assist Local** has Portuguese faster-Whisper STT and Piper TTS.
+- [x] Configured Home Assistant **Codex** pipeline with Portuguese faster-Whisper STT, Codex Assist conversation engine, and Piper TTS.
 - [x] Wrote ESPHome prototype with PDM mic, I2S speaker, wake word, encoder push-to-talk.
 - [ ] ESPHome schema validation/build on target version.
 - [ ] Tested microphone recording and speaker on the physical board.
@@ -31,7 +31,7 @@ Source: https://github.com/Xinyuan-LilyGO/T-Embed-CC1101/blob/master/docs/pinmap
 3. Import lilygo-assistant.yaml and run ESPHome Validate/Compile. Inspect log for hardware/PSRAM/audio pin issues.
 4. Flash using USB for the first installation, not through Bruce OTA.
 5. Adopt the detected ESPHome device in Home Assistant.
-6. In the ESPHome voice-assistant settings, choose your **Assist Local** pipeline (Whisper + Piper).
+6. In the ESPHome voice-assistant settings, choose your **Codex** pipeline (Whisper + Codex Assist + Piper).
 7. Say **Okay Nabu, acenda a luz do escritório** or press encoder to speak.
 
 ## Limitations
