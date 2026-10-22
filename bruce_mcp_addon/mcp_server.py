@@ -53,12 +53,12 @@ async def bruce_capabilities() -> dict[str, Any]:
 
 @mcp.tool()
 async def bruce_wifi_scan() -> dict[str, Any]:
-    """Passively scan nearby Wi-Fi access points and return firmware-reported network identifiers, channels and signal strengths. Does not connect, deauthenticate or transmit attack traffic."""
+    """Discover nearby Wi-Fi access points and return firmware-reported identifiers, channels and RSSI. Firmware scanning may transmit normal probe requests; this tool does not join or modify networks."""
     return await command("wifi.scan", timeout=22)
 
 @mcp.tool()
 async def bruce_ble_scan() -> dict[str, Any]:
-    """Passively discover nearby BLE advertisers with firmware-reported identifiers and RSSI. Does not pair with, connect to or modify devices."""
+    """Discover nearby BLE advertisers with firmware-reported identifiers and RSSI. Active scanning may send BLE scan requests; this tool does not pair with or modify devices."""
     return await command("ble.scan", timeout=22)
 
 @mcp.tool()
