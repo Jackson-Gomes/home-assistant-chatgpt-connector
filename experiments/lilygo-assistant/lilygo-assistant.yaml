@@ -1,0 +1,114 @@
+# LILYGO T-Embed CC1101 Plus — ESPHome voice satellite experiment
+# FLASHING REPLACES BRUCE; not installed or hardware-validated.
+# PDM: GPIO39 clock / GPIO42 data; speaker: GPIO46 BCLK, GPIO40 LRCLK, GPIO7 DOUT.
+
+esphome:
+  name: lilygo-assistant
+  friendly_name: LILYGO Assistant
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret lilygo_assistant_api_key
+
+ota:
+  - platform: esphome
+    password: !secret lilygo_assistant_ota_password
+
+logger:
+  level: INFO
+
+i2s_audio:
+  - id: mic_bus
+    i2s_lrclk_pin: GPIO39
+  - id: speaker_bus
+    i2s_lrclk_pin: GPIO40
+    i2s_bclk_pin: GPIO46
+
+microphone:
+  - platform: i2s_audio
+    id: board_mic
+    i2s_audio_id: mic_bus
+    adc_type: external
+    pdm: true
+    i2s_din_pin: GPIO42
+    sample_rate: 16000
+
+speaker:
+  - platform: i2s_audio
+    id: board_speaker
+    i2s_audio_id: speaker_bus
+    dac_type: external
+    i2s_dout_pin: GPIO7
+    channel: mono
+
+micro_wake_word:
+  id: wakeword
+  microphone: board_mic
+  models:
+    - model: okay_nabu
+  on_wake_word_detected:
+    then:
+      - voice_assistant.start:
+          wake_word: !lambda return wake_word;
+
+voice_assistant:
+  id: assistant
+  microphone: board_mic
+  speaker: board_speaker
+  noise_suppression_level: 2
+  auto_gain: 15dBFS
+  on_client_connected:
+    - micro_wake_word.start:
+  on_client_disconnected:
+    - micro_wake_word.stop:
+  on_end:
+    - delay: 400ms
+    - if:
+        condition:
+          not:
+            micro_wake_word.is_running:
+        then:
+          - micro_wake_word.start:
+  on_error:
+    - delay: 800ms
+    - if:
+        condition:
+          not:
+            micro_wake_word.is_running:
+        then:
+          - micro_wake_word.start:
+
+binary_sensor:
+  - platform: gpio
+    id: encoder_button
+    name: Botao de voz
+    pin:
+      number: GPIO0
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      - delayed_on: 30ms
+    on_press:
+      - micro_wake_word.stop:
+      - voice_assistant.start:
+
+button:
+  - platform: restart
+    name: Reiniciar satelite
