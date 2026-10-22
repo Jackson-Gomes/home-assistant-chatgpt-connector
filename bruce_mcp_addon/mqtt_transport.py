@@ -19,6 +19,7 @@ ALLOWED_OPS = frozenset({
     "screen.brightness", "screen.color", "sound.tone", "sound.say",
     "menu.nav", "menu.option", "ir.send_saved", "rf.send_saved",
     "ir.receive", "rf.receive", "rf.scan",
+    "wifi.scan", "ble.scan",
     "screen.snapshot", "ota.status", "ota.apply",
 })
 
