@@ -52,6 +52,16 @@ async def bruce_capabilities() -> dict[str, Any]:
     return await command("remote.capabilities")
 
 @mcp.tool()
+async def bruce_wifi_scan() -> dict[str, Any]:
+    """Passively scan nearby Wi-Fi access points and return firmware-reported network identifiers, channels and signal strengths. Does not connect, deauthenticate or transmit attack traffic."""
+    return await command("wifi.scan", timeout=22)
+
+@mcp.tool()
+async def bruce_ble_scan() -> dict[str, Any]:
+    """Passively discover nearby BLE advertisers with firmware-reported identifiers and RSSI. Does not pair with, connect to or modify devices."""
+    return await command("ble.scan", timeout=22)
+
+@mcp.tool()
 async def bruce_unlock() -> dict[str, Any]:
     """Grant 5 minutes of sensitive control, only while the owner holds the T-Embed encoder button."""
     return await command("remote.unlock")
