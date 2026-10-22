@@ -1,13 +1,13 @@
 # Passive signal discovery via Bruce MCP
 
-The installed BruceRemote firmware advertises `ble.scan`, `wifi.scan` and `rf.scan` in `remote.capabilities`. The first two were absent from the MCP tool registry and MQTT transport allowlist; this branch exposes **passive discovery only**.
+The installed BruceRemote firmware advertises `ble.scan`, `wifi.scan` and `rf.scan` in `remote.capabilities`. The first two were absent from the MCP tool registry and MQTT transport allowlist; this branch exposes **discovery-only tools**.
 
 ## New MCP tools
 
 - `bruce_ble_scan()` — runs the firmware `ble.scan` command and relays the firmware response, including identifiers/RSSI when provided.
 - `bruce_wifi_scan()` — runs `wifi.scan` and relays SSID, channel and RSSI details when provided.
 
-Both are single-shot with a 22-second acknowledgment timeout. They do not automatically run together or repeat in a loop. They do not pair, connect, alter access points, or inject traffic.
+Both are single-shot with a 22-second acknowledgment timeout. They do not automatically run together or repeat in a loop. They do not pair, associate, alter devices, or inject attack traffic. Wi-Fi scans may send normal probe requests, and active BLE scans may send BLE scan requests, depending on firmware behavior.
 
 ## RF safety and limitations
 
